@@ -46,7 +46,6 @@
   </Folder>
   <Folder Name="/Modules/Community/">
     <Project Path="Modules/Community/TelegramAuth/TelegramAuth.csproj" />
-    <Project Path="Modules/Community/TelegramAuthBot/TelegramAuthBot.csproj" />
     <Project Path="Modules/Tg-notify.bot/Tg-notify.bot.csproj" />
   </Folder>
   <Folder Name="/Modules/ForkPlayerXML/">

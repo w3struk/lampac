@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using Shared.Models.AppConf;
 using Shared.Models.Module;
 
@@ -34,5 +35,33 @@ namespace TelegramAuth.Models
         public int accsdb_sync_group_admin { get; set; } = 100;
 
         public int accsdb_sync_group_user { get; set; }
+
+        /// <summary>
+        /// Секция бота (консолидация бывшего отдельного модуля TelegramAuthBot).
+        /// </summary>
+        public TelegramAuthBotSectionConf bot { get; set; } = new();
+    }
+
+    /// <summary>
+    /// Подсекция bot.* внутри TelegramAuth (план слияния, задача 1.2).
+    /// Все поля nullable/с дефолтами: старые конфиги без секции bot десериализуются в дефолтный объект.
+    /// </summary>
+    public class TelegramAuthBotSectionConf
+    {
+        public bool enable { get; set; } = true;
+
+        public string? token { get; set; }
+
+        public string? username { get; set; }
+
+        public string? display_name { get; set; }
+
+        public List<long>? admin_chat_ids { get; set; }
+
+        public List<long>? owner_telegram_ids { get; set; }
+
+        public bool? notify_admins_on_pending_provision { get; set; }
+
+        public int? request_timeout_sec { get; set; }
     }
 }

@@ -1,7 +1,6 @@
 using Telegram.Bot.Types;
-using TelegramAuthBot.Models;
 
-namespace TelegramAuthBot.Services
+namespace TelegramAuth.Services.Bot
 {
     sealed partial class TelegramAuthBotSession
     {

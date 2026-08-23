@@ -8,6 +8,16 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <PackageReference Include="Telegram.Bot" Version="22.4.4" />
     <ProjectReference Include="..\..\..\Shared\Shared.csproj" />
   </ItemGroup>
+
+  <Target Name="CopyTelegramBotToModReferences" AfterTargets="ResolveReferences">
+    <ItemGroup>
+      <_TelegramBotRef Include="@(ReferencePath)" Condition="'%(Filename)' == 'Telegram.Bot'" />
+    </ItemGroup>
+    <MakeDir Directories="$(MSBuildProjectDirectory)\references" />
+    <Copy SourceFiles="@(_TelegramBotRef)" DestinationFolder="$(MSBuildProjectDirectory)\references"
+      SkipUnchangedFiles="true" Condition="@(_TelegramBotRef->Count()) != 0" />
+  </Target>
 </Project>

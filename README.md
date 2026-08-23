@@ -376,8 +376,7 @@ cd publish && dotnet Core.dll
       "ForkPlayerXML",
       "MsxNative",
       "Potok",
-      "TelegramAuth",
-      "TelegramAuthBot"
+      "TelegramAuth"
     ],
     "LoadModules": [".*"]
   }
@@ -390,7 +389,7 @@ cd publish && dotnet Core.dll
 
 Состояние модуля задают `manifest.json` (`enable`) и списки `BaseModule.SkipModules` / `LoadModules`. Каталог, маршруты и риски публичного доступа: [docs.lampac.dev/modules/overview](https://docs.lampac.dev/modules/overview).
 
-В `base.conf` из SkipModules: Catalog, Tracks, Transcoding, WebLog, CacheMedia, ForkPlayerXML, MsxNative, Potok, TelegramAuth, TelegramAuthBot. `ProxyLimiter` загружается по умолчанию. `DLNA` исключён в starter `example.init.conf`, не в `base.conf`.
+В `base.conf` из SkipModules: Catalog, Tracks, Transcoding, WebLog, CacheMedia, ForkPlayerXML, MsxNative, Potok, TelegramAuth. `ProxyLimiter` загружается по умолчанию. `DLNA` исключён в starter `example.init.conf`, не в `base.conf`.
 
 > [!WARNING]
 > Модули **DLNA**, **Tracks**, **Transcoding**, **GStreamer** и **Catalog** не экранируют входящие запросы как публичный API. Не открывайте их в интернет без firewall, reverse proxy и аутентификации.
@@ -463,7 +462,7 @@ cd publish && dotnet Core.dll
 │  │  Modules/OnlineRUS · OnlinePaid · OnlineAnime · OnlineENG │  │
 │  │  OnlineUKR · OnlineGEO  — по одному проекту на провайдера │  │
 │  │  Modules/Adult/* — платформы 18+                          │  │
-│  │  Modules/Community/* — TelegramAuth, TelegramAuthBot      │  │
+│  │  Modules/Community/* — TelegramAuth (встроенный бот)     │  │
 │  │  Modules/Tg-notify.bot — уведомления о сериях/озвучках    │  │
 │  └───────────────────────────────────────────────────────────┘  │
 └─────────────────────────────────────────────────────────────────┘
@@ -554,7 +553,7 @@ lampac/
 │   ├── AdminPanel/             # Веб-админка (manifest: enable: false)
 │   ├── Adult/                  # Платформы 18+ (15 источников)
 │   ├── Catalog/                # Каталог сайтов (YAML)
-│   ├── Community/              # TelegramAuth, TelegramAuthBot
+│   ├── Community/              # TelegramAuth (встроенный бот)
 │   ├── DLNA/                   # DLNA/UPnP медиасервер
 │   ├── ForkPlayerXML/          # ForkPlayer: /fxml
 │   ├── GStreamer/              # HLS/fMP4 транскодинг (/gst/*)
@@ -612,8 +611,7 @@ lampac/
 | [SISI/README.md](SISI/README.md) | 18+-ядро, платформы `Modules/Adult/*`, таблица маршрутов |
 | [Modules/NextHUB/README.md](Modules/NextHUB/README.md) | YAML-сайты, `/nexthub`, конфиг, WAF |
 | [Modules/Community/README.md](Modules/Community/README.md) | Telegram-авторизация, клиент Lampa, API |
-| [Modules/Community/TelegramAuth/README.md](Modules/Community/TelegramAuth/README.md) | HTTP API `/tg/auth/…`, accsdb, хранилище |
-| [Modules/Community/TelegramAuthBot/README.md](Modules/Community/TelegramAuthBot/README.md) | Long polling-бот, команды, конфиг |
+| [Modules/Community/TelegramAuth/README.md](Modules/Community/TelegramAuth/README.md) | HTTP API `/tg/auth/…`, accsdb, хранилище, встроенный бот |
 | [Modules/GStreamer/README.md](Modules/GStreamer/README.md) | Серверный транскодинг, `gst` в init.conf, `/gst.js` |
 | [Modules/LampacApk/README.md](Modules/LampacApk/README.md) | Генерация Android APK под адрес текущего сервера, подпись и кеш |
 | [Modules/LampaWeb/README.md](Modules/LampaWeb/README.md) | Lampa UI, виджеты Tizen/webOS, `lampainit.js` |

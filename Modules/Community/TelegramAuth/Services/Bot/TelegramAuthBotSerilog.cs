@@ -1,4 +1,4 @@
-namespace TelegramAuthBot.Services
+namespace TelegramAuth.Services.Bot
 {
     internal static class TelegramAuthBotSerilog
     {

@@ -1,6 +1,16 @@
 {
   "TelegramAuth": {
     "enable": true,
+    "bot": {
+      "enable": true,
+      "token": "123456:ABC...",
+      "username": "",
+      "display_name": "Lampac NextGen Bot",
+      "admin_chat_ids": [111111111],
+      "owner_telegram_ids": [222222222],
+      "notify_admins_on_pending_provision": true,
+      "request_timeout_sec": 10
+    },
     "data_dir": "database/tgauth",
     "legacy_import_path": "database/legacy_tgauth",
     "enable_import": true,
