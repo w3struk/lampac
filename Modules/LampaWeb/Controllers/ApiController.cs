@@ -22,6 +22,9 @@ namespace LampaWeb;
 
 public class ApiController : BaseController
 {
+    // MINOR-A: диагностика неактивного гейта пишется один раз на изменение состояния (сброс при активном гейте)
+    static bool _gateInactiveLogged;
+
     [HttpGet, AllowAnonymous]
     [Route("/personal.lampa")]
     [Route("/lampa-main/personal.lampa")]
@@ -668,18 +671,26 @@ public class ApiController : BaseController
                 sb = sb.Replace("{pirate_store}", storejs);
             }
 
+            // Гейт LampaWeb теперь управляется Shared.Services.TelegramGateState (заполняется из TelegramAuth.ModInit).
+            // Условие инъекции = accsdb.enable && TelegramGateState.Active (БЕЗ проверки непустого BotUsername:
+            // окно getMe 0–10с после старта не должно отдавать deny.js). lampainit.js кэшируется Staticache ~20с,
+            // поэтому смена конфига/токена подхватывается с задержкой ≤20с без рестарта (hot-reload через EventListener.UpdateInitFile).
             if (CoreInit.conf.accsdb.enable)
             {
                 string script;
-                var gate = ModInit.conf.telegramAuthGate;
-                if (gate != null && gate.enabled && !string.IsNullOrWhiteSpace(gate.botUsername))
+                var gateActive = Shared.Services.TelegramGateState.Active;
+                if (CoreInit.conf.accsdb.enable && gateActive)
                 {
+                    _gateInactiveLogged = false; // сброс: при следующем отключении снова залогируем
                     script = TelegramGateJs();
                 }
                 else
                 {
-                    if (gate != null && gate.enabled && string.IsNullOrWhiteSpace(gate.botUsername))
-                        Console.WriteLine("LampaWeb.telegramAuthGate: enabled=true, но botUsername пустой — откат на deny.js (гейт без имени бота неавторизуем).");
+                    if (!_gateInactiveLogged)
+                    {
+                        _gateInactiveLogged = true;
+                        Console.WriteLine("LampaWeb: telegram gate не активен — TelegramAuth bot не настроен или отключён; откат на deny.js");
+                    }
 
                     script = FileCache.ReadAllText($"{ModInit.modpath}/plugins/deny.js", "deny.js");
                     if (script.Contains("{country}"))
@@ -908,15 +919,15 @@ public class ApiController : BaseController
 
     private string TelegramGateJs()
     {
-        var g = ModInit.conf.telegramAuthGate;
         string raw = FileCache.ReadAllText($"{ModInit.modpath}/plugins/telegram_auth_gate.js", "telegram_auth_gate.js");
         if (raw.Contains("{country}"))
             StatiCacheDisabled = true; // defensive parity с deny.js; в файле гейта {country} нет
 
-        string bot = HttpUtility.JavaScriptStringEncode(g?.botUsername ?? string.Empty);
-        string svc = HttpUtility.JavaScriptStringEncode(g?.serviceName ?? string.Empty);
+        // Поля TelegramGateState string? — обязателен ?? "" перед JavaScriptStringEncode (иначе NRE на .Replace)
+        string bot = HttpUtility.JavaScriptStringEncode(Shared.Services.TelegramGateState.BotUsername ?? "");
+        string svc = HttpUtility.JavaScriptStringEncode(Shared.Services.TelegramGateState.ServiceName ?? "");
 
-        // {localhost}, {country}, {token} подставляются глобально (688-689, 738-748) или в маршруте
+        // {localhost}, {country}, {token} подставляются глобально или в маршруте TelegramAuthGate()
         return raw
             .Replace("{botUsername}", bot)
             .Replace("{serviceName}", svc);

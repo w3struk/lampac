@@ -1,23 +1,15 @@
 using Telegram.Bot.Types;
-using TelegramAuthBot.Models;
+using TelegramAuth;
 
-namespace TelegramAuthBot.Services
+namespace TelegramAuth.Services.Bot
 {
     sealed partial class TelegramAuthBotSession
     {
         async Task NotifyAdminsOfPendingProvisionAsync(ITelegramBotClient bot, string newUserTgId, string username, string deviceUid, CancellationToken ct)
         {
-            var conf = ModInit.conf;
-            if (!conf.notify_admins_on_pending_provision)
+            // in-process бот: уведомление админам не требует mutations_api_secret (план 2.3).
+            if (!(ModInit.conf.bot.notify_admins_on_pending_provision ?? true))
                 return;
-
-            if (string.IsNullOrEmpty(conf.mutations_api_secret?.Trim()))
-            {
-                TelegramAuthBotSerilog.Log.Warning(
-                    "Новый пользователь ожидает активации (TelegramId={TgId}), mutations_api_secret пуст — уведомления админам не отправлены.",
-                    newUserTgId);
-                return;
-            }
 
             AdminUsersListResponseDto data;
             try
@@ -278,7 +270,7 @@ namespace TelegramAuthBot.Services
         async Task CmdHelpAsync(ITelegramBotClient bot, ChatId chatId, CancellationToken ct)
         {
             var name = _displayName;
-            var conf = ModInit.conf;
+            var adminIds = ModInit.conf.bot.admin_chat_ids;
             var text =
                 $"❓ <b>Помощь по входу в {EscapeHtml(name)}</b>\n\n" +
                 "<b>Быстрый вход:</b>\n" +
@@ -292,8 +284,8 @@ namespace TelegramAuthBot.Services
                 "<code>/devicename &lt;uid&gt; &lt;имя&gt;</code> — имя в базе (для админки); <code>-</code> сбрасывает\n" +
                 "❓ Помощь — эта подсказка\n\n" +
                 "<b>Владелец:</b> числовой user id в <code>TelegramAuth.owner_telegram_ids</code> — при старте Lampac запись admin создаётся в базе. Остальные шлют UID; новых пользователей подтверждаешь в <code>/users</code> (Принять / Отклонить) или кнопками в уведомлении.\n\n" +
-                "<b>Админ-команды:</b> <code>/users</code>, <code>/user</code> &lt;id&gt;, <code>/setuser</code> …, <code>/import</code>, <code>/cleanup</code> + одинаковый <code>mutations_api_secret</code>." +
-                (conf.admin_chat_ids != null && conf.admin_chat_ids.Length > 0
+                "<b>Админ-команды:</b> <code>/users</code>, <code>/user</code> &lt;id&gt;, <code>/setuser</code> …, <code>/import</code>, <code>/cleanup</code>. Бот работает внутри процесса Lampac — общий <code>mutations_api_secret</code> не нужен." +
+                (adminIds != null && adminIds.Count > 0
                     ? "\n\n<code>admin_chat_ids</code> задан: команды из группы — только там; из лички — если твой id в <code>owner_telegram_ids</code> бота (как на сервере)."
                     : "\n\nПустой <code>admin_chat_ids</code> — админ-команды из лички без доп. списков.");
             await bot.SendMessage(chatId, text, parseMode: ParseMode.Html, replyMarkup: MainMenuKeyboard(), cancellationToken: ct).ConfigureAwait(false);

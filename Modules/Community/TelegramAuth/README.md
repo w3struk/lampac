@@ -127,7 +127,7 @@ HTTP API и файловое хранилище для привязки **UID у
 
 ## Связь с ботом и клиентом
 
-- Бот ходит на **`TelegramAuthBot.lampac_base_url`** + пути `tg/auth/...`. Секрет должен совпадать с **`TelegramAuth.mutations_api_secret`**.
+- Бот работает внутри процесса Lampac (in-process) и обращается к хранилищу напрямую через `ModInit.Store`. Конфиг бота — секция **`TelegramAuth.bot`**.
 - Клиент Lampa: [Community README — плагины](../README.md).
 
 ---

@@ -1,7 +1,7 @@
+using System.Text.RegularExpressions;
 using Telegram.Bot.Types;
-using TelegramAuthBot.Models;
 
-namespace TelegramAuthBot.Services
+namespace TelegramAuth.Services.Bot
 {
     sealed partial class TelegramAuthBotSession
     {
@@ -22,11 +22,11 @@ namespace TelegramAuthBot.Services
         const string CbRejectPending = "rp|";
         const string CbReactivateDevice = "react:";
 
-        readonly LampacTelegramAuthHttpClient _api;
+        readonly ITelegramAuthBotBackend _api;
         readonly string _displayName;
         int _firstUpdateLogged;
 
-        public TelegramAuthBotSession(LampacTelegramAuthHttpClient api, string displayName)
+        public TelegramAuthBotSession(ITelegramAuthBotBackend api, string displayName)
         {
             _api = api;
             _displayName = displayName;

@@ -1,6 +1,7 @@
 {
-  "enable": false,
+  "enable": true,
   "dynamic": true,
+  "references": ["references/"],
   "tree": [
     "Controllers",
     "Models",

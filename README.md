@@ -532,7 +532,7 @@ cd publish && dotnet Core.dll
 
 ## Модули
 
-По умолчанию в `SkipModules` ([`config/base.conf`](config/base.conf)): **Catalog**, **DLNA**, **Tracks**, **Transcoding**, **WebLog**, **CacheMedia**, **ProxyLimiter**, **ForkPlayerXML**, **MsxNative**, **TelegramAuth**, **TelegramAuthBot**. WAF и accsdb тоже отключены по умолчанию.
+По умолчанию в `SkipModules` ([`config/base.conf`](config/base.conf)): **Catalog**, **DLNA**, **Tracks**, **Transcoding**, **WebLog**, **CacheMedia**, **ProxyLimiter**, **ForkPlayerXML**, **MsxNative**, **TelegramAuth**. WAF и accsdb тоже отключены по умолчанию.
 
 > Служебные модули **Sync**, **SyncEvents**, **Storage** и **TimeCode** в `SkipModules` **нет** — они загружаются вместе с ядром, пока их не добавите в `SkipModules` вручную.
 
@@ -568,8 +568,7 @@ cd publish && dotnet Core.dll
 | **WatchTogether** | ⛔ | Синхронный просмотр (WebSocket-комнаты). |
 | **AdminPanel** | ⛔ (manifest) | Веб-админка и JSON API (`/adminpanel/`). `"enable": false` в [manifest.json](Modules/AdminPanel/manifest.json). |
 | **ExternalBind** | ⛔ (manifest) | Привязка Lite/Online для удалённых URL (FilmixPro, Rezka, KinoPub). [README](Modules/ExternalBind/README.md) |
-| **TelegramAuth** | ⛔ | HTTP API `/tg/auth/…`, интеграция с accsdb. [README](Modules/Community/TelegramAuth/README.md) |
-| **TelegramAuthBot** | ⛔ | Telegram-бот для привязки устройств (long polling). [README](Modules/Community/TelegramAuthBot/README.md) |
+| **TelegramAuth** | ⛔ | HTTP API `/tg/auth/…`, интеграция с accsdb; встроенный Telegram-бот привязки устройств (`bot.enable`, in-process long polling). [README](Modules/Community/TelegramAuth/README.md) |
 | **Tg-notify.bot** | ⛔ (manifest) | Telegram-уведомления о сериях и озвучках. Плагин `/tg-notify.js`, API `/api/tg/*`. [README](Modules/Tg-notify.bot/README.md) |
 
 <details>
@@ -834,7 +833,7 @@ cd publish && dotnet Core.dll
 │  │  Modules/OnlineRUS · OnlinePaid · OnlineAnime · OnlineENG │  │
 │  │  OnlineUKR · OnlineGEO  — по одному проекту на провайдера │  │
 │  │  Modules/Adult/* — платформы 18+                          │  │
-│  │  Modules/Community/* — TelegramAuth, TelegramAuthBot      │  │
+│  │  Modules/Community/* — TelegramAuth (встроенный бот)       │  │
 │  │  Modules/Tg-notify.bot — уведомления о сериях/озвучках    │  │
 │  └───────────────────────────────────────────────────────────┘  │
 └─────────────────────────────────────────────────────────────────┘
@@ -934,7 +933,7 @@ lampac/
 │   ├── AdminPanel/             # Веб-админка (manifest: enable: false)
 │   ├── Adult/                  # Платформы 18+ (15 источников)
 │   ├── Catalog/                # Каталог сайтов (YAML)
-│   ├── Community/              # TelegramAuth, TelegramAuthBot
+│   ├── Community/              # TelegramAuth (встроенный бот)
 │   ├── DLNA/                   # DLNA/UPnP медиасервер
 │   ├── ForkPlayerXML/          # ForkPlayer: /fxml
 │   ├── GStreamer/              # HLS/fMP4 транскодинг (/gst/*)
@@ -991,8 +990,7 @@ lampac/
 | [SISI/README.md](SISI/README.md) | 18+-ядро, платформы `Modules/Adult/*`, таблица маршрутов |
 | [Modules/NextHUB/README.md](Modules/NextHUB/README.md) | YAML-сайты, `/nexthub`, конфиг, WAF |
 | [Modules/Community/README.md](Modules/Community/README.md) | Telegram-авторизация, клиент Lampa, API |
-| [Modules/Community/TelegramAuth/README.md](Modules/Community/TelegramAuth/README.md) | HTTP API `/tg/auth/…`, accsdb, хранилище |
-| [Modules/Community/TelegramAuthBot/README.md](Modules/Community/TelegramAuthBot/README.md) | Long polling-бот, команды, конфиг |
+| [Modules/Community/TelegramAuth/README.md](Modules/Community/TelegramAuth/README.md) | HTTP API `/tg/auth/…`, accsdb, хранилище, встроенный бот |
 | [Modules/GStreamer/README.md](Modules/GStreamer/README.md) | Серверный транскодинг, `gst` в init.conf, `/gst.js` |
 | [Modules/LampacApk/README.md](Modules/LampacApk/README.md) | Генерация Android APK под адрес текущего сервера, подпись и кеш |
 | [Modules/LampaWeb/README.md](Modules/LampaWeb/README.md) | Lampa UI, виджеты Tizen/webOS, `lampainit.js` |

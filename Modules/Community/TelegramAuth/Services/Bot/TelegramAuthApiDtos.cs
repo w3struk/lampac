@@ -1,6 +1,6 @@
 using System.Collections.Generic;
 
-namespace TelegramAuthBot.Models
+namespace TelegramAuth.Services.Bot
 {
     public sealed class BindCompleteResult
     {
@@ -58,11 +58,14 @@ namespace TelegramAuthBot.Models
         public string telegramId { get; set; }
         public string username { get; set; }
         public string role { get; set; }
+        public string lang { get; set; }
         public bool disabled { get; set; }
         public bool registrationPending { get; set; }
         public bool active { get; set; }
         public string expiresAt { get; set; }
         public int deviceCount { get; set; }
+        public int maxDevices { get; set; }
+        public List<DeviceDto> devices { get; set; }
         public AdminUserAccsBriefDto accs { get; set; }
     }
 }

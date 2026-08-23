@@ -1,18 +1,22 @@
 using Newtonsoft.Json;
+using Newtonsoft.Json.Linq;
 using Telegram.Bot.Types;
-using TelegramAuthBot.Models;
+using TelegramAuth;
 
-namespace TelegramAuthBot.Services
+namespace TelegramAuth.Services.Bot
 {
     sealed partial class TelegramAuthBotSession
     {
         static bool IsTelegramAuthAdmin(UserByTelegramDto user) =>
             user != null && user.found && string.Equals(user.role, "admin", StringComparison.OrdinalIgnoreCase);
 
-        static bool IsAllowedAdminCommandContext(TelegramAuthBotConf conf, ChatType chatType, long chatId, long actorTelegramUserId)
+        // in-process бот доверенный: admin-команды гейтятся по chat/owner-контексту и роли в базе,
+        // mutations_api_secret не требуется (план 2.3).
+        static bool IsAllowedAdminCommandContext(ChatType chatType, long chatId, long actorTelegramUserId)
         {
-            var ids = conf.admin_chat_ids;
-            if (ids == null || ids.Length == 0)
+            var bot = ModInit.conf.bot;
+            var ids = bot.admin_chat_ids;
+            if (ids == null || ids.Count == 0)
                 return true;
 
             if (ids.Contains(chatId))
@@ -20,8 +24,8 @@ namespace TelegramAuthBot.Services
 
             if (chatType == ChatType.Private)
             {
-                var owners = conf.owner_telegram_ids;
-                if (owners != null && owners.Length > 0 && owners.Contains(actorTelegramUserId))
+                var owners = bot.owner_telegram_ids;
+                if (owners != null && owners.Count > 0 && owners.Contains(actorTelegramUserId))
                     return true;
             }
 
@@ -30,20 +34,10 @@ namespace TelegramAuthBot.Services
 
         async Task<bool> TryEnsureAdminMutationAccessAsync(ITelegramBotClient bot, Chat chat, string tgId, CancellationToken ct)
         {
-            var conf = ModInit.conf;
-            if (string.IsNullOrEmpty(conf.mutations_api_secret))
-            {
-                await bot.SendMessage(chat.Id,
-                    "В конфиге бота не задан <code>mutations_api_secret</code> — тот же секрет, что <code>TelegramAuth.mutations_api_secret</code> в init.conf.",
-                    parseMode: ParseMode.Html,
-                    cancellationToken: ct).ConfigureAwait(false);
-                return false;
-            }
-
             if (!long.TryParse(tgId?.Trim(), NumberStyles.Integer, CultureInfo.InvariantCulture, out var actorId))
                 actorId = 0;
 
-            if (!IsAllowedAdminCommandContext(conf, chat.Type, chat.Id, actorId))
+            if (!IsAllowedAdminCommandContext(chat.Type, chat.Id, actorId))
             {
                 await bot.SendMessage(chat.Id,
                     "Админ-команды с этого чата запрещены. Из лички: добавь свой id в <code>owner_telegram_ids</code> бота (те же числа, что <code>TelegramAuth.owner_telegram_ids</code>) или пиши из чата <code>admin_chat_ids</code>. Пустой <code>admin_chat_ids</code> — админ-команды из любого чата, в т.ч. лички.",
@@ -69,18 +63,8 @@ namespace TelegramAuthBot.Services
         {
             var chat = cq.Message?.Chat;
             var chatId = chat?.Id ?? cq.From.Id;
-            var conf = ModInit.conf;
-            if (string.IsNullOrEmpty(conf.mutations_api_secret))
-            {
-                await bot.SendMessage(chatId,
-                    "В конфиге бота не задан <code>mutations_api_secret</code> — тот же секрет, что <code>TelegramAuth.mutations_api_secret</code> в init.conf.",
-                    parseMode: ParseMode.Html,
-                    cancellationToken: ct).ConfigureAwait(false);
-                return false;
-            }
-
             var chatType = chat?.Type ?? ChatType.Private;
-            if (!IsAllowedAdminCommandContext(conf, chatType, chatId, cq.From.Id))
+            if (!IsAllowedAdminCommandContext(chatType, chatId, cq.From.Id))
             {
                 await bot.SendMessage(chatId,
                     "Админ-команды с этого чата запрещены. Для лички добавь свой id в <code>owner_telegram_ids</code> или используй чат из <code>admin_chat_ids</code>.",
@@ -225,7 +209,7 @@ namespace TelegramAuthBot.Services
             var data = await _api.GetAdminUsersAsync(ct).ConfigureAwait(false);
             if (data == null || !data.ok)
             {
-                await bot.SendMessage(chat.Id, "❌ Не удалось загрузить список пользователей (проверь секрет и доступ к Lampac).", cancellationToken: ct).ConfigureAwait(false);
+                await bot.SendMessage(chat.Id, "❌ Не удалось загрузить список пользователей (проверь доступ к Lampac).", cancellationToken: ct).ConfigureAwait(false);
                 return;
             }
 
@@ -255,58 +239,56 @@ namespace TelegramAuthBot.Services
             }
 
             var targetId = m.Groups[1].Value;
-            var (ok, jo, errBody) = await _api.GetAdminUserDetailAsync(targetId, ct).ConfigureAwait(false);
-            if (!ok || jo == null)
+            var detail = await _api.GetAdminUserDetailAsync(targetId, ct).ConfigureAwait(false);
+            if (detail == null)
             {
-                await bot.SendMessage(chat.Id,
-                    "❌ Не удалось загрузить пользователя.\n" + TruncateForTelegram(StripJsonError(errBody), 800),
-                    cancellationToken: ct).ConfigureAwait(false);
+                await bot.SendMessage(chat.Id, "❌ Пользователь не найден в базе TelegramAuth.", cancellationToken: ct).ConfigureAwait(false);
                 return;
             }
 
-            var role = jo.Value<string>("role") ?? "—";
-            var lang = jo.Value<string>("lang") ?? "—";
-            var uname = jo.Value<string>("username");
-            var active = jo.Value<bool?>("active") == true;
-            var disabled = jo.Value<bool?>("disabled") == true;
-            var pending = jo.Value<bool?>("registrationPending") == true;
-            var exp = jo["expiresAt"]?.ToString() ?? "—";
-            var maxDev = jo.Value<int?>("maxDevices");
-            var devCount = jo.Value<int?>("deviceCount");
-            var maxStr = maxDev == -1 ? "∞" : (maxDev?.ToString() ?? "—");
+            var maxDev = detail.maxDevices == -1 ? "∞" : detail.maxDevices.ToString();
+            var expires = string.IsNullOrEmpty(detail.expiresAt) ? "-" : detail.expiresAt;
+            var accessNote = detail.registrationPending
+                ? " (ожидает подтверждения)"
+                : detail.disabled ? " (отключён администратором)" : "";
+            var sb = new System.Text.StringBuilder();
+            sb.AppendLine($"<b>Пользователь</b> <code>{EscapeHtml(detail.telegramId)}</code>");
+            sb.AppendLine($"username: {EscapeHtml(detail.username ?? "—")}");
+            sb.AppendLine($"role: {EscapeHtml(detail.role ?? "—")}");
+            sb.AppendLine($"lang: {EscapeHtml(detail.lang ?? "—")}");
+            sb.AppendLine($"active: {(detail.active ? "✅" : "⏸")}{accessNote}");
+            sb.AppendLine($"disabled: {(detail.disabled ? "🔒" : "—")}");
+            sb.AppendLine($"registrationPending: {(detail.registrationPending ? "⏳" : "—")}");
+            sb.AppendLine($"expiresAt: {EscapeHtml(expires)}");
+            sb.AppendLine($"maxDevices: {maxDev}");
+            sb.AppendLine($"deviceCount: {detail.deviceCount}");
 
-            var accsJson = jo["accs"] is JToken at && at.Type != JTokenType.Null
-                ? at.ToString(Formatting.Indented)
-                : "(нет — действуют значения по умолчанию из роли и init)";
-
-            var devLines = new List<string>();
-            if (jo["devices"] is JArray arr)
+            if (detail.accs != null)
             {
-                foreach (var d in arr.Take(12))
-                {
-                    var uid = d.Value<string>("uid") ?? "";
-                    var nm = d.Value<string>("name");
-                    var act = d.Value<bool?>("active") == true;
-                    var nmShow = string.IsNullOrEmpty(nm) ? "—" : nm;
-                    devLines.Add($"• <code>{EscapeHtml(uid)}</code> · {EscapeHtml(nmShow)} · {(act ? "on" : "off")}");
-                }
-
-                if (arr.Count > 12)
-                    devLines.Add($"… ещё {arr.Count - 12}");
+                sb.AppendLine("\n<b>accs</b>");
+                sb.AppendLine($"group: {(detail.accs.group.HasValue ? detail.accs.group.Value.ToString() : "—")}");
+                sb.AppendLine($"IsPasswd: {(detail.accs.IsPasswd == true ? "✅" : "—")}");
+                sb.AppendLine($"ban: {(detail.accs.ban == true ? "🚫" : "—")}");
+                if (!string.IsNullOrEmpty(detail.accs.ban_msg))
+                    sb.AppendLine($"ban_msg: {EscapeHtml(detail.accs.ban_msg)}");
+                if (!string.IsNullOrEmpty(detail.accs.comment))
+                    sb.AppendLine($"comment: {EscapeHtml(detail.accs.comment)}");
+                if (detail.accs.ids != null && detail.accs.ids.Count > 0)
+                    sb.AppendLine($"ids: {EscapeHtml(string.Join(", ", detail.accs.ids))}");
             }
 
-            var devBlock = devLines.Count > 0 ? string.Join("\n", devLines) : "<i>нет устройств</i>";
+            if (detail.devices != null && detail.devices.Count > 0)
+            {
+                sb.AppendLine("\n<b>devices</b>");
+                foreach (var d in detail.devices)
+                {
+                    var st = d.active ? "✅" : "⏸";
+                    var nm = string.IsNullOrEmpty(d.name) ? "—" : d.name;
+                    sb.AppendLine($"· {st} <code>{EscapeHtml(d.uid)}</code> · {EscapeHtml(nm)}");
+                }
+            }
 
-            var msg =
-                $"<b>Пользователь</b> <code>{EscapeHtml(targetId)}</code>\n" +
-                $"@{EscapeHtml(string.IsNullOrEmpty(uname) ? "—" : uname)} · роль <b>{EscapeHtml(role)}</b> · lang {EscapeHtml(lang)}\n" +
-                $"активен: {(active ? "да" : "нет")} · отключён: {(disabled ? "да" : "нет")} · ожидание: {(pending ? "да" : "нет")}\n" +
-                $"<b>Срок (ExpiresAt):</b> <code>{EscapeHtml(exp)}</code>\n" +
-                $"<b>Устройства:</b> {devCount ?? 0} / {maxStr}\n\n" +
-                "<b>accs</b> (синхронизируется в корневой users.json):\n<pre>" + EscapeHtml(accsJson) + "</pre>\n\n" +
-                "<b>Устройства:</b>\n" + devBlock;
-
-            await bot.SendMessage(chat.Id, msg, parseMode: ParseMode.Html, cancellationToken: ct).ConfigureAwait(false);
+            await bot.SendMessage(chat.Id, sb.ToString(), parseMode: ParseMode.Html, cancellationToken: ct).ConfigureAwait(false);
         }
 
         async Task CmdAdminSetUserAsync(ITelegramBotClient bot, Chat chat, string actorTgId, string text, CancellationToken ct)
@@ -333,7 +315,7 @@ namespace TelegramAuthBot.Services
                     "• <code>param</code> ключ=значение\n" +
                     "• <code>clearparam</code> ключ\n" +
                     "• <code>clear</code> group ban ban_msg comment … — сброс полей accs\n\n" +
-                    "Пока аккаунт <b>ожидает подтверждения</b>, UID <b>не попадает</b> в accsdb (при привязке лишний UID удаляется из users.json).\n\n" +
+                    "Пока аккаунт <b>ожидает подтверждения</b>, UID <b>не попадает</b> в accsdb.\n\n" +
                     "После изменения при включённом sync данные уходят в корневой <code>users.json</code>.",
                     parseMode: ParseMode.Html,
                     cancellationToken: ct).ConfigureAwait(false);
@@ -536,8 +518,8 @@ namespace TelegramAuthBot.Services
                 return;
             }
 
-            var (pok, detail) = await _api.PatchAdminUserAsync(patch, ct).ConfigureAwait(false);
-            if (pok)
+            var (ok, detail) = await _api.PatchAdminUserAsync(targetId, patch, ct).ConfigureAwait(false);
+            if (ok)
                 await bot.SendMessage(chat.Id, $"✅ Сохранено для <code>{EscapeHtml(targetId)}</code>.", parseMode: ParseMode.Html, cancellationToken: ct).ConfigureAwait(false);
             else
                 await bot.SendMessage(chat.Id,
@@ -551,26 +533,20 @@ namespace TelegramAuthBot.Services
                 return;
 
             await bot.SendMessage(chat.Id, "⏳ Запускаю импорт…", cancellationToken: ct).ConfigureAwait(false);
-            var (ok, detail) = await _api.ImportLegacyAsync(ct).ConfigureAwait(false);
-            if (ok)
+            var (res, err) = await _api.ImportLegacyAsync(ct).ConfigureAwait(false);
+            if (err != null)
             {
-                try
-                {
-                    var jo = JObject.Parse(detail);
-                    var msg =
-                        "✅ Импорт завершён.\n" +
-                        $"Пользователей: {jo.Value<int?>("importedUsers") ?? 0}, устройств: {jo.Value<int?>("importedDevices") ?? 0}, админов: {jo.Value<int?>("importedAdmins") ?? 0}, языков: {jo.Value<int?>("importedLangs") ?? 0}";
-                    await bot.SendMessage(chat.Id, msg, cancellationToken: ct).ConfigureAwait(false);
-                }
-                catch
-                {
-                    await bot.SendMessage(chat.Id, "✅ Импорт завершён.\n" + TruncateForTelegram(detail, 3500), cancellationToken: ct).ConfigureAwait(false);
-                }
+                await bot.SendMessage(chat.Id, "❌ Импорт: " + EscapeHtml(TruncateForTelegram(err, 1200)), cancellationToken: ct).ConfigureAwait(false);
+                return;
             }
-            else
-            {
-                await bot.SendMessage(chat.Id, "❌ Ошибка импорта:\n" + TruncateForTelegram(detail, 3500), cancellationToken: ct).ConfigureAwait(false);
-            }
+
+            var sb = new System.Text.StringBuilder();
+            sb.AppendLine("✅ Импорт завершён");
+            sb.AppendLine($"users: {res.ImportedUsers}");
+            sb.AppendLine($"devices: {res.ImportedDevices}");
+            sb.AppendLine($"admins: {res.ImportedAdmins}");
+            sb.AppendLine($"langs: {res.ImportedLangs}");
+            await bot.SendMessage(chat.Id, sb.ToString(), cancellationToken: ct).ConfigureAwait(false);
         }
 
         async Task CmdCleanupAsync(ITelegramBotClient bot, Chat chat, string tgId, CancellationToken ct)
@@ -579,24 +555,13 @@ namespace TelegramAuthBot.Services
                 return;
 
             await bot.SendMessage(chat.Id, "⏳ Очистка неактивных устройств…", cancellationToken: ct).ConfigureAwait(false);
-            var (ok, detail) = await _api.CleanupDevicesAsync(ct).ConfigureAwait(false);
-            if (ok)
+            var (removed, disabled) = await _api.CleanupDevicesAsync(ct).ConfigureAwait(false);
+            if (disabled)
             {
-                try
-                {
-                    var jo = JObject.Parse(detail);
-                    var removed = jo.Value<int?>("removed") ?? 0;
-                    await bot.SendMessage(chat.Id, $"✅ Готово. Удалено записей устройств: {removed}", cancellationToken: ct).ConfigureAwait(false);
-                }
-                catch
-                {
-                    await bot.SendMessage(chat.Id, "✅ Готово.\n" + TruncateForTelegram(detail, 3500), cancellationToken: ct).ConfigureAwait(false);
-                }
+                await bot.SendMessage(chat.Id, "🧹 Очистка отключена (enable_cleanup=false)", cancellationToken: ct).ConfigureAwait(false);
+                return;
             }
-            else
-            {
-                await bot.SendMessage(chat.Id, "❌ Ошибка очистки:\n" + TruncateForTelegram(detail, 3500), cancellationToken: ct).ConfigureAwait(false);
-            }
+            await bot.SendMessage(chat.Id, $"🧹 Очищено неактивных устройств: {removed}", cancellationToken: ct).ConfigureAwait(false);
         }
     }
 }

@@ -132,7 +132,7 @@
     },
     {
       "title": "LampaWeb, Sync, Community, Proxies & Satellite Modules",
-      "purpose": "Modules/LampaWeb (Lampa UI/plugin hosting, lampainit.js family, telegram gate plugins). Modules/Sync subtree (sync.js, bookmarks, storage, timecode). Modules/Community/TelegramAuth and TelegramAuthBot (HTTP API, bot sessions — link Community READMEs). Modules/Proxy/TmdbProxy and CubProxy. TorrServer, Transcoding, Tracks, WebLog, WatchTogether, PidTor — each: manifest, ModInit, main routes or jobs.",
+      "purpose": "Modules/LampaWeb (Lampa UI/plugin hosting, lampainit.js family, telegram gate plugins). Modules/Sync subtree (sync.js, bookmarks, storage, timecode). Modules/Community/TelegramAuth (HTTP API + in-process Telegram-бот как bot.enable IHostedService — link Community README). Modules/Proxy/TmdbProxy and CubProxy. TorrServer, Transcoding, Tracks, WebLog, WatchTogether, PidTor — each: manifest, ModInit, main routes or jobs.",
       "parent": "Modules — Pluggable Feature Extensions"
     },
     {
