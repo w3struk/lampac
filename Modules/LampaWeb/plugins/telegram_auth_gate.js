@@ -414,7 +414,9 @@
 
     if (openBtn) {
       openBtn.addEventListener('click', function () {
-        window.location.href = tgUrl;
+        // Открываем Telegram в новой вкладке: страница должна остаться открытой,
+        // чтобы polling /tg/auth/status увидел привязку и перезагрузил приложение.
+        window.open(tgUrl, '_blank', 'noopener');
       });
     }
 
