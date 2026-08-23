@@ -128,8 +128,10 @@ namespace TelegramAuth
         /// Одноразовая миграция старых ключей в новую секцию bot.*
         /// Новая секция bot.* имеет приоритет: legacy пишется только в пустые/дефолтные значения.
         /// Чтение legacy-секций идёт через ModuleInvoke.Init(section, new JObject()): side-effect —
-        /// слитая секция записывается в CoreInit.CurrentConf (идемпотентно, функционально безвредно);
-        /// fallback — прямое чтение CoreInit.CurrentConf[section].
+        /// слитая секция записывается в CoreInit.CurrentConf (watcher сериализует его в current.conf).
+        /// Чтобы мёртвая секция TelegramAuthBot не всплывала в админке/current.conf,
+        /// после маппинга она вычищается из CurrentConf (см. PurgeLegacySectionsFromCurrentConf).
+        /// Fallback чтения — прямое чтение CoreInit.CurrentConf[section].
         /// </summary>
         static void MigrateLegacyConf()
         {
@@ -249,6 +251,27 @@ namespace TelegramAuth
                 Console.WriteLine(msg);
                 Serilog.Log.Information("{Message}", msg);
             }
+
+            PurgeLegacySectionsFromCurrentConf();
+        }
+
+        /// <summary>
+        /// ModuleInvoke.Init выше персистит слитые legacy-секции в CoreInit.CurrentConf,
+        /// а watcher сериализует CurrentConf в current.conf — секция мёртвого модуля
+        /// TelegramAuthBot всплывала в админке (редактор конфига) после каждой загрузки.
+        /// Вычищаем её после маппинга. LampaWeb не трогаем — живой модуль.
+        /// </summary>
+        static void PurgeLegacySectionsFromCurrentConf()
+        {
+            try
+            {
+                if (CoreInit.CurrentConf is JObject cc && cc["TelegramAuthBot"] != null)
+                {
+                    cc.Remove("TelegramAuthBot");
+                    Serilog.Log.Debug("[TelegramAuth] purged legacy TelegramAuthBot section from current config snapshot");
+                }
+            }
+            catch { }
         }
 
         /// <summary>
