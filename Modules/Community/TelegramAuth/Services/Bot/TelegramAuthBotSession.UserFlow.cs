@@ -121,9 +121,21 @@ namespace TelegramAuth.Services.Bot
                 return true;
             }
 
+            // bind не удался — явные ответы вместо тихого провала
             if (fromStartDeepLink)
-                return false;
+            {
+                if (bind.Detail == BindCompleteDetail.NotFound)
+                    await bot.SendMessage(chatId, "⛔ Тебя нет в базе бота. Обратись к администратору для регистрации.", parseMode: ParseMode.Html, replyMarkup: MainMenuKeyboard(), cancellationToken: ct).ConfigureAwait(false);
+                else if (bind.Detail == BindCompleteDetail.Disabled)
+                    await bot.SendMessage(chatId, "⛔ Доступ отключён администратором. Если только что отправил UID, дождись включения и снова нажми «Проверить снова» в приложении.", parseMode: ParseMode.Html, replyMarkup: MainMenuKeyboard(), cancellationToken: ct).ConfigureAwait(false);
+                else if (bind.Detail == BindCompleteDetail.InternalError || string.IsNullOrEmpty(bind.Detail))
+                    await bot.SendMessage(chatId, "⚠️ Не удалось привязать устройство. Внутренняя ошибка — попробуй позже или обратись к администратору.", parseMode: ParseMode.Html, replyMarkup: MainMenuKeyboard(), cancellationToken: ct).ConfigureAwait(false);
+                else
+                    await bot.SendMessage(chatId, $"⚠️ Не удалось привязать устройство: {EscapeHtml(bind.Detail)}", parseMode: ParseMode.Html, replyMarkup: MainMenuKeyboard(), cancellationToken: ct).ConfigureAwait(false);
+                return true;
+            }
 
+            // ручной ввод UID (не deep-link): сохраняем текущее поведение
             if (user != null && user.found)
                 await bot.SendMessage(chatId, "Не удалось привязать устройство.", replyMarkup: MainMenuKeyboard(), cancellationToken: ct).ConfigureAwait(false);
             else

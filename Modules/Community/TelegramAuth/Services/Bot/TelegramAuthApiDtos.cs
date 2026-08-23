@@ -6,6 +6,17 @@ namespace TelegramAuth.Services.Bot
     {
         public bool Ok { get; set; }
         public bool PendingAdminApproval { get; set; }
+        public string? Detail { get; set; }
+    }
+
+    /// <summary>
+    /// Стабильные коды BindCompleteResult.Detail (не локализуемые, без чувствительных данных).
+    /// </summary>
+    public static class BindCompleteDetail
+    {
+        public const string NotFound = "not_found";
+        public const string Disabled = "disabled";
+        public const string InternalError = "internal_error";
     }
 
     public class UserByTelegramDto

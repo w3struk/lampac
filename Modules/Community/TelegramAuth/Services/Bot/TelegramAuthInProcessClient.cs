@@ -113,16 +113,21 @@ namespace TelegramAuth.Services.Bot
             }
             catch (TelegramAuthBindException ex) when (ex.FailureKind == TelegramAuthBindFailureKind.UserNotFound)
             {
-                return new BindCompleteResult();
+                return new BindCompleteResult { Detail = BindCompleteDetail.NotFound };
             }
             catch (TelegramAuthBindException ex) when (ex.FailureKind == TelegramAuthBindFailureKind.UserDisabled)
             {
-                return new BindCompleteResult();
+                return new BindCompleteResult { Detail = BindCompleteDetail.Disabled };
+            }
+            catch (OperationCanceledException)
+            {
+                // не глотаем отмену — пробрасываем, чтобы корректно завершить поллинг
+                throw;
             }
             catch (Exception ex)
             {
                 TelegramAuthBotSerilog.Log.Error(ex, "BindCompleteAsync failed for {TelegramId}/{Uid}", telegramId, uid);
-                return new BindCompleteResult();
+                return new BindCompleteResult { Detail = BindCompleteDetail.InternalError };
             }
         }
 
