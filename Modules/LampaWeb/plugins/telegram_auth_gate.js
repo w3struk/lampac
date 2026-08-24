@@ -347,12 +347,24 @@
     removeOverlay();
 
     var bot = CONFIG.botUsername.replace(/^@/, '');
-    var tgUrl = 'https://t.me/' + encodeURIComponent(bot) + '?start=' + encodeURIComponent(uid);
-    var qrUrl = 'https://api.qrserver.com/v1/create-qr-code/?size=220x220&data=' + encodeURIComponent(tgUrl);
+    var hasBot = !!bot && bot.indexOf('{') === -1;
+    var tgUrl = '';
+    var qrUrl = '';
+    if (hasBot) {
+      tgUrl = 'https://t.me/' + encodeURIComponent(bot) + '?start=' + encodeURIComponent(uid);
+      qrUrl = 'https://api.qrserver.com/v1/create-qr-code/?size=220x220&data=' + encodeURIComponent(tgUrl);
+    }
     var footArr = CONFIG.footerLines;
     var footerMessage = footArr.length ? footArr[Math.floor(Math.random() * footArr.length)] : '';
     var msgHtml = escapeHtml(message || '');
-    var botEsc = escapeHtml(bot);
+
+    var stepsHtml = hasBot
+      ? '<div class="tg-auth-gate__step"><div class="tg-auth-gate__step-index">1</div><div>Нажми <b>Открыть Telegram</b> — откроется твой Telegram-клиент (работает с форками).</div></div>' +
+        '<div class="tg-auth-gate__step"><div class="tg-auth-gate__step-index">2</div><div>Дождитесь сообщения об успехе — страница обновится автоматически. Если нет — «Проверить снова».</div></div>'
+      // Деградация !hasBot (пустой/неподставленный bot): привязка через Telegram недоступна,
+      // копирование UID удалено из гейта — текст без ручной отправки.
+      : '<div class="tg-auth-gate__step"><div class="tg-auth-gate__step-index">1</div><div>Авторизация через Telegram временно недоступна.</div></div>' +
+        '<div class="tg-auth-gate__step"><div class="tg-auth-gate__step-index">2</div><div>Обратитесь к администратору сервера.</div></div>';
 
     overlay = document.createElement('div');
     overlay.id = 'tg-auth-gate-overlay';
@@ -364,59 +376,37 @@
       '<div class="tg-auth-gate__eyebrow">' + serviceLabel() + ' · Авторизация</div>' +
       '<div class="tg-auth-gate__title">Вход в ' + serviceLabel() + '</div>' +
       '<div class="tg-auth-gate__text">' + (msgHtml || escapeHtml('Открой Telegram и привяжи это устройство, чтобы продолжить просмотр.')) + '</div>' +
-      '<div class="tg-auth-gate__steps">' +
-      '<div class="tg-auth-gate__step tg-auth-gate__only-desktop"><div class="tg-auth-gate__step-index">1</div><div>Нажми <b>Открыть Telegram</b> или отсканируй QR-код телефоном.</div></div>' +
-      '<div class="tg-auth-gate__step tg-auth-gate__only-mobile"><div class="tg-auth-gate__step-index">1</div><div>Нажми <b>Открыть Telegram</b> — откроется чат с ботом, UID подставится в стартовое сообщение.</div></div>' +
-      '<div class="tg-auth-gate__step"><div class="tg-auth-gate__step-index">2</div><div>Бот <b>@' + botEsc + '</b> автоматически получит UID устройства.</div></div>' +
-      '<div class="tg-auth-gate__step"><div class="tg-auth-gate__step-index">3</div><div>После сообщения об успехе вернись сюда и нажми <b>Проверить снова</b>.</div></div>' +
-      '</div>' +
+       '<div class="tg-auth-gate__steps">' + stepsHtml + '</div>' +
       '<div class="tg-auth-gate__uid-label">UID устройства</div>' +
       '<div class="tg-auth-gate__uid">' + escapeHtml(uid) + '</div>' +
-      '<div class="tg-auth-gate__hint">' +
-      '<span class="tg-auth-gate__hint-desktop">Если Telegram не открылся автоматически, скопируй UID вручную и отправь его боту. Для ТВ оставлен крупный QR и большой код.</span>' +
-      '<span class="tg-auth-gate__hint-mobile">На этом экране QR не нужен: открой Telegram кнопкой ниже или скопируй UID и отправь боту вручную.</span>' +
-      '</div>' +
-      '<div class="tg-auth-gate__actions">' +
-      '<div class="tg-auth-gate__button tg-auth-gate__button--primary selector" id="tg-auth-gate-open">Открыть Telegram</div>' +
-      '<div class="tg-auth-gate__button selector" id="tg-auth-gate-refresh">Проверить снова</div>' +
-      '<div class="tg-auth-gate__button tg-auth-gate__button--ghost selector" id="tg-auth-gate-copy">Скопировать UID</div>' +
-      '</div>' +
+        (hasBot ? '<div class="tg-auth-gate__hint">Нажми <b>Открыть Telegram</b> или отсканируй QR.</div>' : '') +
+       '<div class="tg-auth-gate__actions">' +
+        (hasBot ? '<div class="tg-auth-gate__button tg-auth-gate__button--primary selector" id="tg-auth-gate-open">Открыть Telegram</div>' : '') +
+       '<div class="tg-auth-gate__button selector" id="tg-auth-gate-refresh">Проверить снова</div>' +
+       '</div>' +
       (footerMessage ? '<div class="tg-auth-gate__meta" style="margin-top:1.35em;font-size:1.02em;color:#c4cad4;">' + escapeHtml(footerMessage) + '</div>' : '') +
       '</div>' +
-      '<div class="tg-auth-gate__qr-wrap">' +
+      (hasBot ? '<div class="tg-auth-gate__qr-wrap">' +
       '<img class="tg-auth-gate__qr" src="' + escapeHtml(qrUrl) + '" alt="Telegram QR">' +
       '<div class="tg-auth-gate__qr-title">Сканируй QR</div>' +
       '<div class="tg-auth-gate__qr-text">Телефон откроет Telegram с готовой ссылкой на вход в ' + serviceLabel() + '.</div>' +
-      '</div>' +
+      '</div>' : '') +
       '</div>' +
       '</div>' +
       '</div>';
 
     document.body.appendChild(overlay);
 
-    var copyBtn = document.getElementById('tg-auth-gate-copy');
     var openBtn = document.getElementById('tg-auth-gate-open');
     var refreshBtn = document.getElementById('tg-auth-gate-refresh');
 
-    if (copyBtn) {
-      copyBtn.addEventListener('click', function () {
-        try {
-          Lampa.Utils.copyTextToClipboard(uid, function () {
-            Lampa.Noty.show('UID скопирован');
-          }, function () {
-            Lampa.Noty.show('Не удалось скопировать UID');
-          });
-        } catch (e) {
-          Lampa.Noty.show('Не удалось скопировать UID');
-        }
-      });
-    }
-
     if (openBtn) {
       openBtn.addEventListener('click', function () {
-        // Открываем Telegram в новой вкладке: страница должна остаться открытой,
-        // чтобы polling /tg/auth/status увидел привязку и перезагрузил приложение.
-        window.open(tgUrl, '_blank', 'noopener');
+        // uid свежий на момент клика (applyServerNewUid мог сменить storage)
+        // Прямая навигация по схеме: клиент открывает приложение, не выгружая страницу;
+        // iframe-метод заблокирован современным Chrome для cross-origin фреймов.
+        var freshUid = getUID();
+        location.href = 'tg://resolve?domain=' + encodeURIComponent(bot) + '&start=' + encodeURIComponent(freshUid);
       });
     }
 
