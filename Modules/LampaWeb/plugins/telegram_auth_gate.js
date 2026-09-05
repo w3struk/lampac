@@ -14,7 +14,6 @@
     successOverlayMs: 1600,
     testaccsdbTpl: '{localhost}/testaccsdb',
     footerLines: [
-      'Хорошего вечера',
       'Почти внутри — остался один шаг',
       'Сейчас впустим тебя внутрь'
     ]
@@ -30,6 +29,44 @@
   var accsNetwork = new Lampa.Reguest();
   var accsdbAuthHint = '';
 
+  // Детект TV: Android TV, Tizen, webOS, Orsay, NetCast — через
+  // Lampa.Platform + UA-маркеры. Используется для TV-режима
+  // (QR-first, без кнопки открытия клиента).
+  function isTV() {
+    try {
+      var pl = typeof Lampa !== 'undefined' ? Lampa.Platform : null;
+      if (pl && typeof pl.is === 'function') {
+        var tvTags = ['tizen', 'webos', 'webos_land', 'orsay', 'netcast', 'apple_tv', 'apple_tv_gtv'];
+        for (var i = 0; i < tvTags.length; i++) {
+          try {
+            if (pl.is(tvTags[i])) return true;
+          } catch (e) { }
+        }
+      }
+    } catch (e2) { }
+    var ua = '';
+    try {
+      ua = navigator.userAgent || '';
+    } catch (e3) { }
+    if (/Android TV|AndroidTV|\bATV\b|BRAVIA|AFTM|AFTB|AFTT|AFTSS|AFTS|MiTV|PHILIPSTV|HisenseTV|SmartTV|Tizen|Web0S|webOS|SmartHub|\bMaple\b|Opera TV|HbbTV|tvOS|AppleTV|Chromecast|\bCrKey\b/i.test(ua)) return true;
+    // Стоковый WebView TV-боксов себя как TV не маркирует
+    // (KP1: "Linux; Android 14; KP1 Build/…; wv"). Эвристика: Android +
+    // ноль тач-поинтов + большой экран. Только maxTouchPoints отражает
+    // железо: 'ontouchstart' in window истинно на любом Android
+    // (наличие API, а не тачскрина). Без свойства — консервативно не TV.
+    var noTouch = false;
+    try {
+      noTouch = ('maxTouchPoints' in navigator) && !(navigator.maxTouchPoints > 0);
+    } catch (e4) { }
+    var bigScreen = false;
+    try {
+      // Порог 600 CSS-px: 720p при density 320 даёт viewport 640 — такие TV
+      // тоже должны попадать в TV-режим. Тач-чек остаётся главным гардом.
+      bigScreen = Math.max(screen.width || 0, screen.height || 0) >= 600;
+    } catch (e5) { }
+    return /Android/i.test(ua) && noTouch && bigScreen;
+  }
+
   function accsdbUrl() {
     var tpl = CONFIG.testaccsdbTpl;
     return tpl.indexOf('{') >= 0 ? ORIGIN + '/testaccsdb' : tpl;
@@ -43,6 +80,72 @@
       .replace(/>/g, '&gt;')
       .replace(/"/g, '&quot;');
   }
+
+  // Тексты гейта (ru/en). Английские формулировки — по утверждённым макетам,
+  // русские — их прямые эквиваленты. Выбор — по языку Lampa, иначе язык браузера.
+  var LANG = {
+    en: {
+      title: 'Log in with Telegram',
+      sub: 'Securely access your account using your Telegram profile.',
+      s1lead: 'Tap below to open Telegram.',
+      s1sub: 'Your client will launch.',
+      s2lead: 'Confirm the login in your Telegram app.',
+      s2sub: 'This screen will update automatically.',
+      d1: 'Tap the button to open Telegram',
+      d2: 'Confirm the login in the app',
+      open: 'Open Telegram',
+      openDesktop: 'Open Telegram Desktop',
+      qrCap: 'Scan with your phone\u2019s camera app',
+      okTitle: 'Logged in successfully',
+      okUser: 'confirmed via Telegram',
+      okNote: 'This screen will close automatically.',
+      unav1: 'Telegram login is temporarily unavailable.',
+      unav2: 'Contact your server administrator.'
+    },
+    ru: {
+      title: 'Вход через Telegram',
+      sub: 'Безопасно войди, используя свой профиль Telegram.',
+      s1lead: 'Нажми кнопку ниже, чтобы открыть Telegram.',
+      s1sub: 'Твой Telegram-клиент откроется.',
+      s2lead: 'Подтверди вход в приложении Telegram.',
+      s2sub: 'Этот экран обновится автоматически.',
+      d1: 'Нажми кнопку, чтобы открыть Telegram',
+      d2: 'Подтверди вход в приложении',
+      open: 'Открыть Telegram',
+      openDesktop: 'Открыть Telegram Desktop',
+      qrCap: 'Отсканируй камерой телефона',
+      okTitle: 'Вход выполнен',
+      okUser: 'подтверждён через Telegram',
+      okNote: 'Экран закроется автоматически.',
+      unav1: 'Авторизация через Telegram временно недоступна.',
+      unav2: 'Обратись к администратору сервера.'
+    }
+  };
+
+  function currentLang() {
+    var l = '';
+    try {
+      l = String(Lampa.Storage.get('language', '') || '');
+    } catch (e) { }
+    if (!l) {
+      try {
+        l = String(navigator.language || '');
+      } catch (e2) { }
+    }
+    return l.toLowerCase().indexOf('en') === 0 ? 'en' : 'ru';
+  }
+
+  function t(k) {
+    var L = LANG[currentLang()] || LANG.ru;
+    return (L && L[k]) || LANG.en[k] || k;
+  }
+
+  // Инлайн-SVG гейта (все размеры задаются в CSS — глобальный svg{width:100%}
+  // ядра Lampa перебивает атрибуты width/height).
+  // Настоящий знак Lampa (как в widgets/lg/app/img/logo-icon.svg): размеры задаются в CSS.
+  var SVG_LOGO = '<svg viewBox="0 0 110 104" aria-hidden="true"><path d="M81.6744 103.11C98.5682 93.7234 110 75.6967 110 55C110 24.6243 85.3757 0 55 0C24.6243 0 0 24.6243 0 55C0 75.6967 11.4318 93.7234 28.3255 103.11C14.8869 94.3724 6 79.224 6 62C6 34.938 27.938 13 55 13C82.062 13 104 34.938 104 62C104 79.224 95.1131 94.3725 81.6744 103.11Z" fill="white"/><path d="M92.9546 80.0076C95.5485 74.5501 97 68.4446 97 62C97 38.804 78.196 20 55 20C31.804 20 13 38.804 13 62C13 68.4446 14.4515 74.5501 17.0454 80.0076C16.3618 77.1161 16 74.1003 16 71C16 49.4609 33.4609 32 55 32C76.5391 32 94 49.4609 94 71C94 74.1003 93.6382 77.1161 92.9546 80.0076Z" fill="white"/><path d="M55 89C69.3594 89 81 77.3594 81 63C81 57.9297 79.5486 53.1983 77.0387 49.1987C82.579 54.7989 86 62.5 86 71C86 88.1208 72.1208 102 55 102C37.8792 102 24 88.1208 24 71C24 62.5 27.421 54.7989 32.9613 49.1987C30.4514 53.1983 29 57.9297 29 63C29 77.3594 40.6406 89 55 89Z" fill="white"/><path d="M73 63C73 72.9411 64.9411 81 55 81C45.0589 81 37 72.9411 37 63C37 53.0589 45.0589 45 55 45C64.9411 45 73 53.0589 73 63Z" fill="white"/></svg>';
+  var SVG_PLANE = '<svg viewBox="0 0 24 24" aria-hidden="true"><path fill="#fff" d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z"/></svg>';
+  var SVG_CHECK = '<svg viewBox="0 0 24 24" aria-hidden="true"><path fill="#fff" d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z"/></svg>';
 
   function getUID() {
     var uid = '';
@@ -236,35 +339,94 @@
     var style = document.createElement('style');
     style.id = 'tg-auth-gate-style';
     style.textContent =
-      'body.tg-auth-gate-lock > *:not(#tg-auth-gate-overlay):not(#tg-auth-gate-style){filter:blur(4px);pointer-events:none !important;user-select:none !important;}' +
-      '#tg-auth-gate-overlay{position:fixed;inset:0;z-index:999999;background:radial-gradient(circle at top, rgba(22,22,26,.96), rgba(6,6,9,.98));display:flex;align-items:center;justify-content:center;padding:3.5vh 3.5vw;box-sizing:border-box;}' +
-      '.tg-auth-gate__shell{width:min(1500px,100%);max-height:100%;display:flex;align-items:center;justify-content:center;}' +
-      '.tg-auth-gate__box{width:100%;background:linear-gradient(180deg, rgba(17,17,20,.96), rgba(11,11,14,.98));border-radius:28px;padding:2.8em 3em;color:#fff;box-shadow:0 0 0 1px rgba(255,255,255,.06),0 30px 100px rgba(0,0,0,.45);}' +
-      '.tg-auth-gate__grid{display:grid;grid-template-columns:minmax(0,1.45fr) minmax(260px,380px);gap:2.4em;align-items:center;}' +
-      '.tg-auth-gate__eyebrow{font-size:1em;letter-spacing:.16em;text-transform:uppercase;color:#8d939f;margin-bottom:1em;}' +
-      '.tg-auth-gate__title{font-size:clamp(2.6em,4vw,4.2em);font-weight:800;line-height:1.05;margin-bottom:.28em;}' +
-      '.tg-auth-gate__text{font-size:clamp(1.15em,1.7vw,1.45em);line-height:1.45;color:#d1d5db;max-width:32em;margin-bottom:1.2em;}' +
-      '.tg-auth-gate__steps{display:grid;gap:.7em;margin:1.4em 0 1.8em;}' +
-      '.tg-auth-gate__step{display:flex;align-items:flex-start;gap:.9em;font-size:1.08em;color:#d6dae2;}' +
-      '.tg-auth-gate__step-index{flex:0 0 1.9em;height:1.9em;border-radius:999px;background:#20232b;color:#fff;display:flex;align-items:center;justify-content:center;font-weight:700;}' +
-      '.tg-auth-gate__uid-label{font-size:.95em;letter-spacing:.12em;text-transform:uppercase;color:#9399a5;margin-bottom:.7em;}' +
-      '.tg-auth-gate__uid{font-size:clamp(2.2em,4.2vw,3.8em);font-weight:800;letter-spacing:.16em;font-family:ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,monospace;background:#0f1116;border-radius:20px;padding:.55em .7em;margin-bottom:.65em;word-break:break-word;border:1px solid rgba(255,255,255,.06);}' +
-      '.tg-auth-gate__hint{font-size:1.05em;line-height:1.5;color:#afb6c2;margin-bottom:1.5em;max-width:34em;}' +
-      '.tg-auth-gate__actions{display:flex;gap:.9em;flex-wrap:wrap;}' +
-      '.tg-auth-gate__button{min-height:3.4em;padding:.95em 1.35em;border-radius:16px;cursor:pointer;display:inline-flex;align-items:center;justify-content:center;background:#222631;color:#fff;font-size:1.05em;font-weight:700;box-shadow:inset 0 0 0 1px rgba(255,255,255,.05);}' +
-      '.tg-auth-gate__button--primary{background:#f3f4f6;color:#0c0d10;}' +
-      '.tg-auth-gate__button--ghost{background:#171a21;color:#dfe3ea;}' +
-      '.tg-auth-gate__button.focus{transform:scale(1.03);box-shadow:0 0 0 3px rgba(255,255,255,.18);}' +
-      '.tg-auth-gate__meta{margin-top:1.2em;font-size:.95em;color:#7f8793;word-break:break-all;}' +
-      '.tg-auth-gate__qr-wrap{display:flex;flex-direction:column;align-items:center;justify-content:center;background:#0d0f14;border-radius:24px;padding:1.4em;border:1px solid rgba(255,255,255,.05);}' +
-      '.tg-auth-gate__qr{width:min(100%,320px);aspect-ratio:1/1;border-radius:18px;background:#fff;padding:14px;box-sizing:border-box;}' +
-      '.tg-auth-gate__qr-title{font-size:1.2em;font-weight:700;margin-top:1em;margin-bottom:.35em;}' +
-      '.tg-auth-gate__qr-text{font-size:1em;line-height:1.45;color:#b8bec9;text-align:center;max-width:18em;}' +
-      '.tg-auth-gate__only-desktop{display:flex;}' +
-      '.tg-auth-gate__only-mobile{display:none !important;}' +
-      '.tg-auth-gate__hint-mobile{display:none;}' +
-      '@media (max-width: 980px){.tg-auth-gate__box{padding:2em 1.4em;border-radius:22px;}.tg-auth-gate__grid{grid-template-columns:1fr;gap:1.6em;}.tg-auth-gate__text,.tg-auth-gate__hint{max-width:none;}.tg-auth-gate__qr-wrap{order:-1;}.tg-auth-gate__actions{display:grid;grid-template-columns:1fr;}}' +
-      '@media (max-width: 600px){#tg-auth-gate-overlay{align-items:flex-start;justify-content:flex-start;padding:max(1rem,env(safe-area-inset-top)) max(1rem,env(safe-area-inset-right)) max(1.25rem,env(safe-area-inset-bottom)) max(1rem,env(safe-area-inset-left));overflow-y:auto;-webkit-overflow-scrolling:touch;}.tg-auth-gate__shell{width:100%;min-height:min-content;padding-bottom:.5rem;}.tg-auth-gate__box{padding:1.35rem 1.1rem;border-radius:18px;}.tg-auth-gate__grid{gap:1.1rem;}.tg-auth-gate__qr-wrap{display:none !important;}.tg-auth-gate__eyebrow{font-size:.82em;margin-bottom:.65em;}.tg-auth-gate__title{font-size:clamp(1.55rem,6.5vw,2.1rem);}.tg-auth-gate__text{font-size:1rem;margin-bottom:.95em;}.tg-auth-gate__steps{margin:1em 0 1.25em;gap:.55em;}.tg-auth-gate__step{font-size:.95rem;gap:.65em;}.tg-auth-gate__step-index{flex:0 0 1.65em;height:1.65em;font-size:.9em;}.tg-auth-gate__uid-label{font-size:.78em;margin-bottom:.45em;}.tg-auth-gate__uid{font-size:clamp(1.35rem,5.2vw,1.85rem);letter-spacing:.1em;padding:.5em .55em;border-radius:14px;margin-bottom:.5em;}.tg-auth-gate__hint{font-size:.9rem;line-height:1.45;margin-bottom:1.1em;}.tg-auth-gate__button{min-height:3rem;font-size:1rem;border-radius:14px;width:100%;}.tg-auth-gate__actions{gap:.65em;}.tg-auth-gate__only-desktop{display:none !important;}.tg-auth-gate__only-mobile{display:flex !important;}.tg-auth-gate__hint-desktop{display:none !important;}.tg-auth-gate__hint-mobile{display:block !important;color:#afb6c2;}}';
+      'body.tg-auth-gate-lock>*:not(#tg-auth-gate-overlay):not(#tg-auth-gate-style){filter:blur(4px);pointer-events:none!important;user-select:none!important;}' +
+      '#tg-auth-gate-overlay{position:fixed;inset:0;z-index:999999;display:flex;padding:20px;box-sizing:border-box;overflow-y:auto;background:#0a0a0d;background-image:radial-gradient(640px 340px at 50% -80px,rgba(47,155,227,.12),rgba(47,155,227,0) 70%);font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Inter,Arial,sans-serif;color:#fff;-webkit-font-smoothing:antialiased;}' +
+      '.tga-shell{margin:auto;width:100%;display:flex;justify-content:center;}' +
+      '.tga-card{width:min(400px,100%);background:#1c1c1f;border:1px solid rgba(255,255,255,.07);border-radius:30px;padding:26px 24px 20px;box-sizing:border-box;box-shadow:0 30px 80px rgba(0,0,0,.55);animation:tga-in .35s ease;}' +
+      '@keyframes tga-in{from{opacity:0;transform:translateY(10px);}to{opacity:1;transform:none;}}' +
+      '.tga-brand{display:flex;align-items:center;gap:.55em;margin-bottom:1.15em;}' +
+      '.tga-brand svg{width:26px;height:26px;flex:0 0 auto;display:block;}' +
+      '.tga-brand span{font-size:15px;font-weight:600;color:#b9b9c0;}' +
+      '.tga-title{font-size:27px;font-weight:800;letter-spacing:-.01em;line-height:1.15;margin:0 0 .32em;}' +
+      '.tga-sub{font-size:15px;line-height:1.45;color:#9c9ca4;margin:0 0 1.25em;}' +
+      '.tga-steps{margin:0 0 1.9em;padding:0;}' +
+      '.tga-steps--plain{display:none;}' +
+      '.tga-step{display:flex;gap:.8em;}' +
+      '.tga-rail{display:flex;flex-direction:column;align-items:center;align-self:stretch;}' +
+      '.tga-tile{width:46px;height:46px;flex:0 0 auto;border-radius:13px;background:#2f9be3;display:flex;align-items:center;justify-content:center;box-shadow:0 4px 16px rgba(47,155,227,.35);}' +
+      '.tga-tile svg{width:24px;height:24px;display:block;}' +
+      '.tga-line{width:2px;flex:1 0 auto;min-height:12px;background:rgba(255,255,255,.12);margin:6px 0;border-radius:2px;}' +
+      '.tga-step:last-child .tga-line{display:none;}' +
+      '.tga-steptext{padding-top:3px;}' +
+      '.tga-lead{font-size:15px;font-weight:700;line-height:1.35;}' +
+      '.tga-sub2{font-size:14px;line-height:1.4;color:#9c9ca4;}' +
+      '.tga-unav{font-size:14.5px;line-height:1.5;color:#9c9ca4;}' +
+      '.tga-actions{display:grid;gap:.7em;margin:0 0 .95em;}' +
+      '.tga-btn{display:flex;align-items:center;justify-content:center;gap:.5em;min-height:52px;padding:.8em 1.2em;border-radius:14px;font-size:16px;font-weight:600;cursor:pointer;border:0;box-sizing:border-box;color:#fff;text-decoration:none;}' +
+      '.tga-btn svg{width:22px;height:22px;flex:0 0 auto;display:block;}' +
+      '.tga-btn--primary{background:#2f9be3;box-shadow:0 6px 20px rgba(47,155,227,.35);}' +
+      '.tga-btn--primary:hover{background:#2589cc;}' +
+      '.tga-btn--secondary{background:#2e2e33;}' +
+      '.tga-btn--secondary:hover{background:#38383e;}' +
+      '.tga-btn--sm{min-height:44px;font-size:14px;border-radius:12px;}' +
+      '.tga-btn.focus,.tga-btn:focus-visible,.tga-btn:focus{outline:none;box-shadow:0 0 0 3px rgba(47,155,227,.6);}' +
+      '.tga-only-desk{display:none;}' +
+      '.tga-uid{text-align:center;font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:12.5px;letter-spacing:.08em;color:#8e8e96;margin:0 0 .9em;}' +
+      '#tg-auth-progress{display:block;height:4px;border-radius:99px;background:rgba(255,255,255,.08);overflow:hidden;}' +
+      '.tg-auth-gate__progress-fill{display:block;width:40%;height:100%;border-radius:inherit;background:#2f9be3;animation:tga-slide 1.6s ease-in-out infinite;}' +
+      '@keyframes tga-slide{0%{transform:translateX(-110%);}100%{transform:translateX(280%);}}' +
+      '.tga-meta{font-size:12px;color:#6e6e76;text-align:center;margin-top:.4em;}' +
+      '.tga-side{display:none;}' +
+      '.tga-ok{display:flex;flex-direction:column;align-items:center;text-align:center;padding:.6em 0 .2em;}' +
+      '.tga-badge{width:64px;height:64px;border-radius:50%;background:#22c07a;display:flex;align-items:center;justify-content:center;margin-bottom:1em;box-shadow:0 8px 24px rgba(34,192,122,.4);}' +
+      '.tga-badge svg{width:30px;height:30px;display:block;}' +
+      '.tga-oktitle{font-size:20px;font-weight:800;margin-bottom:.4em;}' +
+      '.tga-okuser{font-size:15px;color:#d6dae2;margin-bottom:.4em;word-break:break-all;}' +
+      '.tga-oknote{font-size:13.5px;color:#9c9ca4;}' +
+      '@media (min-width:700px){' +
+      '.tga-card{width:min(620px,100%);background:#17171b;border-radius:24px;padding:36px 40px 28px;}' +
+      '.tga-brand{justify-content:center;margin-bottom:1.7em;}' +
+      '.tga-brand svg{width:32px;height:32px;}' +
+      '.tga-brand span{font-size:22px;font-weight:700;color:#fff;}' +
+      '.tga-body{display:grid;grid-template-columns:minmax(0,1fr) 210px;}' +
+      '.tga-main{padding-right:32px;min-width:0;}' +
+      '.tga-side{display:flex;flex-direction:column;align-items:center;justify-content:center;border-left:1px solid rgba(255,255,255,.08);padding-left:32px;}' +
+      '.tga-title{font-size:22px;}' +
+      '.tga-sub{font-size:14px;margin-bottom:1.1em;}' +
+      '.tga-steps--timeline{display:none;}' +
+      '.tga-steps--plain{display:grid;gap:.5em;margin-bottom:1.4em;}' +
+      '.tga-pstep{font-size:15px;color:#9c9ca4;}' +
+      '.tga-pstep b{color:#fff;font-weight:600;margin-right:.3em;}' +
+      '.tga-actions{display:flex;flex-wrap:wrap;}' +
+      '.tga-uid{text-align:left;margin:.95em 0 0;}' +
+      '.tga-qr{background:#fff;border-radius:16px;padding:12px;width:100%;box-sizing:border-box;}' +
+      '.tga-qr img{width:100%;height:auto;display:block;border-radius:6px;aspect-ratio:1/1;}' +
+      '.tga-qrcap{font-size:13px;line-height:1.4;color:#9c9ca4;text-align:center;margin-top:.9em;}' +
+      '.tga-meta{text-align:left;}' +
+      '.tga-only-desk{display:inline;}' +
+      '.tga-only-mob{display:none;}' +
+      '}' +
+      '@media (prefers-reduced-motion:reduce){.tga-card{animation:none;}.tg-auth-gate__progress-fill{animation:none;width:60%;}}' +
+      'body.tga-tv #tg-auth-gate-overlay{padding:10px;}' +
+      'body.tga-tv .tga-card{width:min(480px,100%);padding:14px 20px 12px;}' +
+      'body.tga-tv .tga-brand{justify-content:center;margin-bottom:.5em;}' +
+      'body.tga-tv .tga-brand svg{width:22px;height:22px;}' +
+      'body.tga-tv .tga-brand span{font-size:16px;font-weight:700;color:#fff;}' +
+      'body.tga-tv .tga-body{display:flex;flex-direction:column;}' +
+      'body.tga-tv .tga-main{display:contents;}' +
+      'body.tga-tv .tga-title{order:1;font-size:24px;text-align:center;}' +
+      'body.tga-tv .tga-sub{order:2;font-size:13px;text-align:center;margin-bottom:.8em;}' +
+      'body.tga-tv .tga-side{order:3;display:flex;border-left:0;padding-left:0;margin-bottom:.8em;}' +
+      'body.tga-tv .tga-steps--timeline{display:none;}' +
+      'body.tga-tv .tga-steps--plain{display:grid;order:4;gap:.4em;max-width:400px;width:100%;margin-left:auto;margin-right:auto;margin-bottom:1em;}' +
+      'body.tga-tv .tga-pstep{font-size:15px;}' +
+      'body.tga-tv .tga-uid{order:5;font-size:12px;text-align:center;margin:.7em 0;}' +
+      'body.tga-tv .tga-actions{order:7;justify-content:center;margin-bottom:0;}' +
+      'body.tga-tv .tga-actions .tga-btn{min-height:44px;font-size:15px;padding:.7em 1.8em;}' +
+      'body.tga-tv #tg-auth-progress{order:6;}' +
+      'body.tga-tv .tga-meta{display:none;}' +
+      'body.tga-tv .tga-qr{max-width:160px;padding:10px;margin-left:auto;margin-right:auto;}' +
+      'body.tga-tv .tga-qrcap{display:none;}';
     document.body.appendChild(style);
   }
 
@@ -305,6 +467,9 @@
     removeOverlay();
     document.body.classList.remove('tg-auth-gate-lock');
     try {
+      document.body.classList.remove('tga-tv');
+    } catch (e) { }
+    try {
       delete window.start_deep_link;
     } catch (e) { }
     try {
@@ -327,14 +492,14 @@
     overlay = document.createElement('div');
     overlay.id = 'tg-auth-gate-overlay';
     overlay.innerHTML =
-      '<div class="tg-auth-gate__shell">' +
-      '<div class="tg-auth-gate__box" style="max-width:760px;">' +
-      '<div class="tg-auth-gate__eyebrow">' + serviceLabel() + ' · Авторизация</div>' +
-      '<div class="tg-auth-gate__title">Устройство авторизовано</div>' +
-      '<div class="tg-auth-gate__text">Выполняется вход в ' + serviceLabel() + '. Подождите пару секунд...</div>' +
-      '<div class="tg-auth-gate__steps">' +
-      '<div class="tg-auth-gate__step"><div class="tg-auth-gate__step-index">✓</div><div><b>@' + uname + '</b> успешно подтверждён через Telegram.</div></div>' +
-      '<div class="tg-auth-gate__step"><div class="tg-auth-gate__step-index">→</div><div>Сейчас экран авторизации закроется автоматически.</div></div>' +
+      '<div class="tga-shell">' +
+      '<div class="tga-card">' +
+      '<div class="tga-brand">' + SVG_LOGO + '<span>Lampa Auth</span></div>' +
+      '<div class="tga-ok">' +
+      '<div class="tga-badge">' + SVG_CHECK + '</div>' +
+      '<div class="tga-oktitle">' + escapeHtml(t('okTitle')) + '</div>' +
+      '<div class="tga-okuser">@' + uname + ' · ' + escapeHtml(t('okUser')) + '</div>' +
+      '<div class="tga-oknote">' + escapeHtml(t('okNote')) + '</div>' +
       '</div>' +
       '</div>' +
       '</div>';
@@ -358,39 +523,48 @@
     var footerMessage = footArr.length ? footArr[Math.floor(Math.random() * footArr.length)] : '';
     var msgHtml = escapeHtml(message || '');
 
-    var stepsHtml = hasBot
-      ? '<div class="tg-auth-gate__step"><div class="tg-auth-gate__step-index">1</div><div>Нажми <b>Открыть Telegram</b> — откроется твой Telegram-клиент (работает с форками).</div></div>' +
-        '<div class="tg-auth-gate__step"><div class="tg-auth-gate__step-index">2</div><div>Дождитесь сообщения об успехе — страница обновится автоматически. Если нет — «Проверить снова».</div></div>'
-      // Деградация !hasBot (пустой/неподставленный bot): привязка через Telegram недоступна,
-      // копирование UID удалено из гейта — текст без ручной отправки.
-      : '<div class="tg-auth-gate__step"><div class="tg-auth-gate__step-index">1</div><div>Авторизация через Telegram временно недоступна.</div></div>' +
-        '<div class="tg-auth-gate__step"><div class="tg-auth-gate__step-index">2</div><div>Обратитесь к администратору сервера.</div></div>';
+    var isTVMode = isTV();
+    try {
+      document.body.classList.toggle('tga-tv', isTVMode);
+    } catch (e) { }
+
+    // Шаги: мобайл — таймлайн с плитками-иконками (по макету), десктоп —
+    // нумерованный список. Деградация !hasBot — текстовый блок без шагов.
+    var unavHtml = '<div class="tga-unav">' + escapeHtml(t('unav1')) + ' ' + escapeHtml(t('unav2')) + '</div>';
+    var stepsTimelineHtml = hasBot
+      ? '<div class="tga-steps tga-steps--timeline">' +
+        '<div class="tga-step"><div class="tga-rail"><div class="tga-tile">' + SVG_PLANE + '</div><div class="tga-line"></div></div><div class="tga-steptext"><div class="tga-lead">' + escapeHtml(t('s1lead')) + '</div><div class="tga-sub2">' + escapeHtml(t('s1sub')) + '</div></div></div>' +
+        '<div class="tga-step"><div class="tga-rail"><div class="tga-tile">' + SVG_CHECK + '</div><div class="tga-line"></div></div><div class="tga-steptext"><div class="tga-lead">' + escapeHtml(t('s2lead')) + '</div><div class="tga-sub2">' + escapeHtml(t('s2sub')) + '</div></div></div>' +
+        '</div>'
+      : '<div class="tga-steps tga-steps--timeline">' + unavHtml + '</div>';
+    // Кнопка Refresh удалена целиком (polling + Noty покрывают флоу);
+    // actions-блок рендерится только если есть хоть одна кнопка.
+    var openHtml = (hasBot && !isTVMode)
+      ? '<div class="tga-btn tga-btn--primary selector" id="tg-auth-gate-open" tabindex="0" role="button">' + SVG_PLANE + '<span class="tga-only-mob">' + escapeHtml(t('open')) + '</span><span class="tga-only-desk">' + escapeHtml(t('openDesktop')) + '</span></div>'
+      : '';
+    var stepsPlainHtml = hasBot
+      ? '<div class="tga-steps tga-steps--plain">' +
+        '<div class="tga-pstep"><b>1.</b>' + escapeHtml(isTVMode ? t('qrCap') : t('d1')) + '</div>' +
+        '<div class="tga-pstep"><b>2.</b>' + escapeHtml(t('d2')) + '</div>' +
+        '</div>'
+      : '<div class="tga-steps tga-steps--plain">' + unavHtml + '</div>';
 
     overlay = document.createElement('div');
     overlay.id = 'tg-auth-gate-overlay';
     overlay.innerHTML =
-      '<div class="tg-auth-gate__shell">' +
-      '<div class="tg-auth-gate__box">' +
-      '<div class="tg-auth-gate__grid">' +
-      '<div>' +
-      '<div class="tg-auth-gate__eyebrow">' + serviceLabel() + ' · Авторизация</div>' +
-      '<div class="tg-auth-gate__title">Вход в ' + serviceLabel() + '</div>' +
-      '<div class="tg-auth-gate__text">' + (msgHtml || escapeHtml('Открой Telegram и привяжи это устройство, чтобы продолжить просмотр.')) + '</div>' +
-       '<div class="tg-auth-gate__steps">' + stepsHtml + '</div>' +
-      '<div class="tg-auth-gate__uid-label">UID устройства</div>' +
-      '<div class="tg-auth-gate__uid">' + escapeHtml(uid) + '</div>' +
-        (hasBot ? '<div class="tg-auth-gate__hint">Нажми <b>Открыть Telegram</b> или отсканируй QR.</div>' : '') +
-       '<div class="tg-auth-gate__actions">' +
-        (hasBot ? '<div class="tg-auth-gate__button tg-auth-gate__button--primary selector" id="tg-auth-gate-open">Открыть Telegram</div>' : '') +
-       '<div class="tg-auth-gate__button selector" id="tg-auth-gate-refresh">Проверить снова</div>' +
-       '</div>' +
-      (footerMessage ? '<div class="tg-auth-gate__meta" style="margin-top:1.35em;font-size:1.02em;color:#c4cad4;">' + escapeHtml(footerMessage) + '</div>' : '') +
+      '<div class="tga-shell">' +
+      '<div class="tga-card">' +
+      '<div class="tga-brand">' + SVG_LOGO + '<span>Lampa Auth</span></div>' +
+      '<div class="tga-body"><div class="tga-main">' +
+      '<div class="tga-title">' + escapeHtml(t('title')) + '</div>' +
+      '<div class="tga-sub">' + (msgHtml || escapeHtml(t('sub'))) + '</div>' +
+      stepsTimelineHtml + stepsPlainHtml +
+      (openHtml ? '<div class="tga-actions">' + openHtml + '</div>' : '') +
+      '<div class="tga-uid">UID: ' + escapeHtml(uid) + '</div>' +
+      '<div id="tg-auth-progress"><span class="tg-auth-gate__progress-fill"></span></div>' +
+      (footerMessage ? '<div class="tga-meta">' + escapeHtml(footerMessage) + '</div>' : '') +
       '</div>' +
-      (hasBot ? '<div class="tg-auth-gate__qr-wrap">' +
-      '<img class="tg-auth-gate__qr" src="' + escapeHtml(qrUrl) + '" alt="Telegram QR">' +
-      '<div class="tg-auth-gate__qr-title">Сканируй QR</div>' +
-      '<div class="tg-auth-gate__qr-text">Телефон откроет Telegram с готовой ссылкой на вход в ' + serviceLabel() + '.</div>' +
-      '</div>' : '') +
+      (hasBot ? '<div class="tga-side"><div class="tga-qr"><img src="' + escapeHtml(qrUrl) + '" alt="Telegram QR"></div><div class="tga-qrcap">' + escapeHtml(t('qrCap')) + '</div></div>' : '') +
       '</div>' +
       '</div>' +
       '</div>';
@@ -398,7 +572,6 @@
     document.body.appendChild(overlay);
 
     var openBtn = document.getElementById('tg-auth-gate-open');
-    var refreshBtn = document.getElementById('tg-auth-gate-refresh');
 
     if (openBtn) {
       openBtn.addEventListener('click', function () {
@@ -410,11 +583,30 @@
       });
     }
 
-    if (refreshBtn) {
-      refreshBtn.addEventListener('click', function () {
-        checkAccess(true);
+    // Refresh удалён: мгновенная перепроверка больше недоступна,
+    // polling каждые 10с и Noty покрывают флоу.
+    // TV: кнопок не осталось (Open скрыт) — фокусить нечего,
+    // QR-флоу полностью на polling; D-pad-навигации не требуется.
+
+    // Div-кнопки с tabindex фокусируются пультом/клавиатурой, но Enter по ним
+    // не стреляет click сам (как у <button>). Дублируем активацию клавишами,
+    // с keyCode-фолбэком для старых TV WebView без современного ev.key.
+    function armKeyActivation(btn) {
+      if (!btn) return;
+      btn.addEventListener('keydown', function (ev) {
+        var k = ev.key;
+        var kc = ev.keyCode;
+        if (k === 'Enter' || kc === 13 || k === ' ' || k === 'Spacebar' || kc === 32) {
+          try {
+            ev.preventDefault();
+          } catch (e) { }
+          try {
+            btn.click();
+          } catch (e2) { }
+        }
       });
     }
+    armKeyActivation(openBtn);
   }
 
   function startPolling() {
