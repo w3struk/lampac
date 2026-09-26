@@ -169,6 +169,7 @@ public class CoreInit
             throw new Exception("Failed to deserialize init.conf");
 
         _tempConf.accsdb.MergeAccounts();
+        _tempConf.accsdb.RebuildInitUidKeys();
 
         conf = _tempConf;
 
@@ -192,16 +193,17 @@ public class CoreInit
                     if (yamlObject != null)
                     {
                         string json = JsonConvertPool.SerializeObject(yamlObject);
-                        JsonConvert.PopulateObject(json, conf, new JsonSerializerSettings
+                        conf.accsdb.ApplyYamlReload(() =>
                         {
-                            Error = (se, ev) =>
+                            JsonConvert.PopulateObject(json, conf, new JsonSerializerSettings
                             {
-                                ev.ErrorContext.Handled = true;
-                                Console.WriteLine($"DeserializeObject Exception init.yaml:\n{ev.ErrorContext.Error}\n\n");
-                            }
+                                Error = (se, ev) =>
+                                {
+                                    ev.ErrorContext.Handled = true;
+                                    Console.WriteLine($"DeserializeObject Exception init.yaml:\n{ev.ErrorContext.Error}\n\n");
+                                }
+                            });
                         });
-
-                        conf.accsdb.MergeAccounts();
 
                         PosterApi.Initialization(conf.omdbapi_key, conf.posterApi);
                     }

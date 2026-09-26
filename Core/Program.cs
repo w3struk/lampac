@@ -7,6 +7,7 @@ using Microsoft.Extensions.Hosting;
 using Newtonsoft.Json;
 using Serilog;
 using Shared;
+using Shared.Models.AppConf;
 using Shared.Models.Base;
 using Shared.Models.SQL;
 using Shared.PlaywrightCore;
@@ -293,7 +294,16 @@ public class Program
 
     #region UpdateUsersDb
     static int _updateUsersDb = 0;
+
+    // последний успешно применённый ключ изменения (guid:exists:hash) и быстрый probe (guid:mtime:length)
     static string _usersKeyUpdate = string.Empty;
+    static string _usersProbe = string.Empty;
+
+    // consecutive-тики без users.json (отсутствие трактуется как «файловых нет» только после нескольких)
+    static int _usersMissingDb = 0;
+
+    // инстанс AccsConf, к которому относятся _usersKeyUpdate/_usersProbe: hot-reload => новый => форс reconcile
+    static AccsConf _usersKeyAccs = null;
 
     static void UpdateUsersDb(object state)
     {
@@ -302,45 +312,111 @@ public class Program
 
         try
         {
-            if (File.Exists("users.json"))
+            // локальная ссылка на тик: старый инстанс не трогает разделяемое состояние нового
+            var c = CoreInit.conf;
+            var accs = c?.accsdb;
+            if (accs == null)
+                return;
+
+            if (!ReferenceEquals(accs, _usersKeyAccs))
             {
-                var lastWriteTime = File.GetLastWriteTime("users.json");
+                _usersKeyAccs = accs;
+                _usersKeyUpdate = string.Empty;
+                _usersProbe = string.Empty;
+                _usersMissingDb = 0;
+            }
 
-                string keyUpdate = $"{CoreInit.conf?.guid}:{CoreInit.conf?.accsdb?.users?.Count ?? 0}:{lastWriteTime}";
-                if (keyUpdate == _usersKeyUpdate)
-                    return;
+            string guid = c?.guid;
 
-                foreach (var user in JsonConvert.DeserializeObject<List<AccsUser>>(File.ReadAllText("users.json")))
+            if (!File.Exists("users.json"))
+            {
+                // users.json.tmp рядом — признак незавершённого атомарного Move из AdminPanel
+                if (File.Exists("users.json.tmp"))
                 {
-                    try
-                    {
-                        var find = CoreInit.conf.accsdb.findUser(user.id ?? user.ids?.First());
-                        if (find != null)
-                        {
-                            find.id = user.id;
-                            find.ids = user.ids;
-                            find.group = user.group;
-                            find.IsPasswd = user.IsPasswd;
-                            find.expires = user.expires;
-                            find.ban = user.ban;
-                            find.ban_msg = user.ban_msg;
-                            find.comment = user.comment;
-                            find.@params = user.@params;
-                        }
-                        else
-                        {
-                            CoreInit.conf.accsdb.users.Add(user);
-                        }
-                    }
-                    catch (Exception ex)
-                    {
-                        Log.Error(ex, "{Class} {CatchId}", "Program", "id_85syu64t");
-                    }
+                    _usersMissingDb = 0;
+                    return;
                 }
 
-                _usersKeyUpdate = keyUpdate;
-                CoreInit.conf.accsdb.RefreshUsers();
+                string missingKey = $"{guid}:false:absent";
+                if (missingKey == _usersKeyUpdate)
+                    return;
+
+                _usersMissingDb++;
+
+                // отсутствие файла => пустой снапшот только после 2–3 последовательных тиков
+                if (_usersMissingDb < 3)
+                {
+                    Log.Warning("UsersDbMissing {Class} {ConsecutiveMissing}", "Program", _usersMissingDb);
+                    return;
+                }
+
+                accs.ApplyFileSnapshot(new List<AccsUser>());
+                _usersKeyUpdate = missingKey;
+                _usersProbe = $"{guid}:false";
+                return;
             }
+
+            _usersMissingDb = 0;
+
+            DateTime lastWriteTime;
+            long length;
+            try
+            {
+                lastWriteTime = File.GetLastWriteTimeUtc("users.json");
+                length = new FileInfo("users.json").Length;
+            }
+            catch (IOException)
+            {
+                return; // файл занят/пересоздаётся (Move из AdminPanel) — ретрай на следующем тике
+            }
+
+            // быстрый pre-check: пока mtime+length те же, содержимое не перечитываем
+            string probe = $"{guid}:{lastWriteTime.Ticks}:{length}";
+            if (probe == _usersProbe)
+                return;
+
+            byte[] fileBytes;
+            try
+            {
+                fileBytes = File.ReadAllBytes("users.json");
+            }
+            catch (IOException)
+            {
+                return; // transient-занятость файла — ретрай на следующем тике
+            }
+
+            string keyUpdate = $"{guid}:true:{Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(fileBytes))}";
+            if (keyUpdate == _usersKeyUpdate)
+            {
+                _usersProbe = probe;
+                return;
+            }
+
+            List<AccsUser> fileUsers;
+            try
+            {
+                // битый JSON: fail-open — память и ключи не коммитим, ретрай на следующем тике
+                fileUsers = JsonConvert.DeserializeObject<List<AccsUser>>(Encoding.UTF8.GetString(fileBytes));
+            }
+            catch (Exception ex)
+            {
+                Log.Error(ex, "{Class} {CatchId}", "Program", "id_gvenci5l");
+                return;
+            }
+
+            // пустой/пробельный файл или литерал null: десериализатор возвращает null без исключения.
+            // Это НЕ валидный [] — fail-open без коммита ключа/probe и без изменения памяти.
+            if (fileUsers == null)
+            {
+                Log.Warning("UsersDbReconcile skipped: users.json deserialized to null");
+                return;
+            }
+
+            accs.ApplyFileSnapshot(fileUsers);
+
+            // ключ/probe — только ПОСЛЕ успешного применения
+            _usersKeyUpdate = keyUpdate;
+            _usersProbe = probe;
         }
         catch (Exception ex)
         {
