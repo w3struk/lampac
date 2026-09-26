@@ -334,6 +334,131 @@ public class AccsConf
         return keys;
     }
 
+    /// <summary>
+    /// Немедленное удаление uid из памяти accsdb (Sprint 2), без ожидания reconcile.
+    /// Пустой/null uid игнорируется, повторный вызов — no-op, исключений не бросает.
+    /// _fileUidKeys не трогаем: файл — источник истины, reconcile вернёт запись,
+    /// если она всё ещё есть в файле.
+    /// </summary>
+    public void RemoveUid(string uid)
+    {
+        if (string.IsNullOrWhiteSpace(uid))
+            return;
+
+        RemoveUids(new[] { uid });
+    }
+
+    /// <summary>
+    /// Пакетное удаление uid из памяти под _usersSync. Записи, у которых хотя бы один ключ
+    /// (id или ids) входит в _initUidKeys, не трогаются вовсе (как в ApplyFileSnapshot).
+    /// Записи с нормализованным id == uid удаляются целиком; у остальных uid вычищается из ids
+    /// (без учёта регистра); запись без id и ids после вычистки тоже удаляется. Затем users
+    /// пересобирается и вызывается RefreshUsers().
+    /// </summary>
+    public void RemoveUids(IEnumerable<string> uids)
+    {
+        if (uids == null)
+            return;
+
+        var keys = new HashSet<string>();
+        foreach (var uid in uids)
+        {
+            if (string.IsNullOrWhiteSpace(uid))
+                continue;
+
+            string key = uid.ToLowerAndTrim();
+            if (!string.IsNullOrEmpty(key))
+                keys.Add(key);
+        }
+
+        if (keys.Count == 0)
+            return;
+
+        lock (_usersSync)
+        {
+            if (users == null || users.Count == 0)
+                return;
+
+            var initKeys = _initUidKeys ?? new HashSet<string>();
+            var current = users.ToList();
+            var kept = new List<AccsUser>(current.Count);
+            bool changed = false;
+
+            foreach (var user in current)
+            {
+                if (user == null)
+                {
+                    changed = true;
+                    continue;
+                }
+
+                // record-level защита init-записей (как в ApplyFileSnapshot): если хотя бы один
+                // ключ записи пришёл из init.conf/accounts — запись не трогаем вовсе.
+                if (UserKeys(user).Any(k => initKeys.Contains(k)))
+                {
+                    kept.Add(user);
+                    continue;
+                }
+
+                // удаление записи по id
+                if (!string.IsNullOrEmpty(user.id)
+                    && keys.Contains(user.id.ToLowerAndTrim()))
+                {
+                    changed = true;
+                    continue;
+                }
+
+                // вычистка удаляемых ключей из ids
+                bool idsChanged = false;
+                if (user.ids != null && user.ids.Count > 0)
+                {
+                    var newIds = new List<string>(user.ids.Count);
+
+                    foreach (var id in user.ids)
+                    {
+                        if (string.IsNullOrEmpty(id))
+                        {
+                            // пустой элемент не несём дальше, но фиксируем изменение, чтобы оно закоммитилось
+                            changed = true;
+                            idsChanged = true;
+                            continue;
+                        }
+
+                        string norm = id.ToLowerAndTrim();
+                        if (keys.Contains(norm))
+                        {
+                            changed = true;
+                            idsChanged = true;
+                            continue;
+                        }
+
+                        newIds.Add(id);
+                    }
+
+                    if (newIds.Count != user.ids.Count)
+                        user.ids = newIds;
+                }
+
+                // если после вычистки у записи не осталось ни id, ни ids — удалить её.
+                // Проверяем только затронутые записи, чтобы не вычищать посторонние битые.
+                if (idsChanged && string.IsNullOrEmpty(user.id) && (user.ids == null || user.ids.Count == 0))
+                {
+                    changed = true;
+                    continue;
+                }
+
+                kept.Add(user);
+            }
+
+            if (!changed)
+                return;
+
+            users = new ConcurrentBag<AccsUser>(kept);
+        }
+
+        RefreshUsers();
+    }
+
     public AccsUser findUser(HttpContext httpContext, out string uid)
     {
         if (users == null || users.Count == 0)
