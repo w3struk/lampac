@@ -116,7 +116,8 @@ public class Program
         Directory.CreateDirectory("logs");
 
         LoggerConfiguration loggerConfiguration = init.serilog
-            ? new LoggerConfiguration().MinimumLevel.Error()
+            // Warning (а не Error): чтобы события accsdb reconcile/remove были видны в файловом логе.
+            ? new LoggerConfiguration().MinimumLevel.Warning()
             : new LoggerConfiguration().MinimumLevel.Fatal();
 
         if (init.serilog)
@@ -302,7 +303,9 @@ public class Program
     // consecutive-тики без users.json (отсутствие трактуется как «файловых нет» только после нескольких)
     static int _usersMissingDb = 0;
 
-    // инстанс AccsConf, к которому относятся _usersKeyUpdate/_usersProbe: hot-reload => новый => форс reconcile
+    // инстанс AccsConf, к которому относятся _usersKeyUpdate/_usersProbe: hot-reload => новый => форс reconcile.
+    // У нового инстанса _fileUidKeys == null (bootstrap) — первый reconcile ничего не удаляет,
+    // состав корневого users.json подтянется ближайшим тиком (см. AccsConf.ApplyFileSnapshot).
     static AccsConf _usersKeyAccs = null;
 
     static void UpdateUsersDb(object state)
@@ -330,7 +333,8 @@ public class Program
 
             if (!File.Exists("users.json"))
             {
-                // users.json.tmp рядом — признак незавершённого атомарного Move из AdminPanel
+                // users.json.tmp рядом — защита от незавершённого атомарного Move из AdminPanel
+                // (EBUSY-fallback пишет файл напрямую, поэтому transient-отсутствие не трактуем как wipe)
                 if (File.Exists("users.json.tmp"))
                 {
                     _usersMissingDb = 0;

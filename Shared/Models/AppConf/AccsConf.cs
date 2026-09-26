@@ -49,6 +49,8 @@ public class AccsConf
     //     отзывается reconcile при исчезновении строки из файла;
     //  4) white_uids/domainId_pattern/bypass_accsdb — не записи users, в reconcile не участвуют.
     // Нормализация ключей везде — ToLowerAndTrim() (как в RefreshUsers/findUser).
+    // accsdb.enable=false не очищает users/память и не останавливает reconcile (осознанно:
+    // дешевле держать память актуальной к моменту включения; middleware при этом пропускает всех).
 
     // Синхронизация структурных изменений users и атомарной пересборки _searchUsers.
     private readonly object _usersSync = new object();
@@ -63,6 +65,12 @@ public class AccsConf
 
     // Ключи последнего УСПЕШНО применённого users.json. null — снапшота ещё не было
     // (bootstrap: первый reconcile после старта/смены инстанса ничего не удаляет).
+    // Hot-reload init.conf/init.yaml создаёт новый CoreInit => новый инстанс AccsConf с
+    // _fileUidKeys == null (bootstrap: первый reconcile не удаляет, состав файла подтянется
+    // ближайшим тиком). Core.Program._usersKeyAccs форсит reconcile при смене инстанса, а
+    // RebuildInitUidKeys() пересобирает _initUidKeys: из updateConf (свежий _tempConf) и из
+    // ApplyYamlReload (живой инстанс под _usersSync). Значения _fileUidKeys не переносятся между
+    // генерациями намеренно: слепой перенос мог бы воскресить уже удалённый uid.
     private HashSet<string> _fileUidKeys;
 
     public void RefreshUsers()
@@ -214,6 +222,9 @@ public class AccsConf
         }
 
         List<AccsUser> removed = null;
+        int added = 0;
+        // updated — число файловых записей, сопоставленных с существующими (не число реально изменившихся полей).
+        int updated = 0;
 
         lock (_usersSync)
         {
@@ -244,6 +255,7 @@ public class AccsConf
                     var find = findUser(lookup);
                     if (find != null)
                     {
+                        updated++;
                         find.id = user.id;
                         find.ids = user.ids;
                         find.group = user.group;
@@ -256,6 +268,7 @@ public class AccsConf
                     }
                     else
                     {
+                        added++;
                         users.Add(user);
                     }
                 }
@@ -298,11 +311,16 @@ public class AccsConf
 
         RefreshUsers();
 
-        if (removed != null)
+        // Warning — минимальный уровень файлового лога при serilog:true (Core/Program.cs),
+        // Log.Information не виден. Не понижать на Information.
+        // uids — только удалённые, максимум 5, хешированные (без plaintext uid).
+        if (added + updated + (removed?.Count ?? 0) > 0)
         {
-            Serilog.Log.Information("UsersDbReconcile removed={Removed} uids={Uids}",
-                removed.Count,
-                string.Join(",", removed.Take(5).Select(u => CrypTo.md5(u.id ?? u.ids?.FirstOrDefault() ?? "unknown"))));
+            Serilog.Log.Warning("UsersDbReconcile added={Added} updated={Updated} removed={Removed} uids={Uids}",
+                added,
+                updated,
+                removed?.Count ?? 0,
+                string.Join(",", (removed ?? new List<AccsUser>()).Take(5).Select(u => CrypTo.md5((u.id ?? u.ids?.FirstOrDefault() ?? "unknown").ToLowerAndTrim()))));
         }
     }
 
@@ -374,6 +392,10 @@ public class AccsConf
         if (keys.Count == 0)
             return;
 
+        // ключи, реально повлёкшие удаление (record по id или вычистка из ids) — для лога
+        var matched = new HashSet<string>();
+        bool changed = false;
+
         lock (_usersSync)
         {
             if (users == null || users.Count == 0)
@@ -382,7 +404,6 @@ public class AccsConf
             var initKeys = _initUidKeys ?? new HashSet<string>();
             var current = users.ToList();
             var kept = new List<AccsUser>(current.Count);
-            bool changed = false;
 
             foreach (var user in current)
             {
@@ -405,6 +426,7 @@ public class AccsConf
                     && keys.Contains(user.id.ToLowerAndTrim()))
                 {
                     changed = true;
+                    matched.Add(user.id.ToLowerAndTrim());
                     continue;
                 }
 
@@ -429,6 +451,7 @@ public class AccsConf
                         {
                             changed = true;
                             idsChanged = true;
+                            matched.Add(norm);
                             continue;
                         }
 
@@ -457,6 +480,16 @@ public class AccsConf
         }
 
         RefreshUsers();
+
+        // Warning — минимальный уровень файлового лога при serilog:true (Core/Program.cs),
+        // Log.Information здесь не виден. Не понижать обратно на Information.
+        // matched — ключи, реально повлёкшие удаление (id-match или вычистка из ids), максимум 5, хешированные.
+        if (matched.Count > 0)
+        {
+            Serilog.Log.Warning("UsersDbRemoveUid matched={Matched} uids={Uids}",
+                matched.Count,
+                string.Join(",", matched.Take(5).Select(k => CrypTo.md5(k))));
+        }
     }
 
     public AccsUser findUser(HttpContext httpContext, out string uid)
