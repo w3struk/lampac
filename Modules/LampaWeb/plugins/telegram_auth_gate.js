@@ -20,6 +20,9 @@
   var DEVICE_NAME_URL = ORIGIN + '/tg/auth/device/name';
 
   var overlay = null;
+  var gateKeyDown = null;
+  var gateKeyUp = null;
+  var gateActivateAt = 0;
   var pollTimer = null;
   var authorized = false;
   var accsNetwork = new Lampa.Reguest();
@@ -368,7 +371,7 @@
       '.tga-sub2{font-size:14px;line-height:1.4;color:#9c9ca4;}' +
       '.tga-unav{font-size:14.5px;line-height:1.5;color:#9c9ca4;}' +
       '.tga-actions{display:grid;gap:.7em;margin:0 0 .95em;}' +
-      '.tga-btn{display:flex;align-items:center;justify-content:center;gap:.5em;min-height:52px;padding:.8em 1.2em;border-radius:14px;font-size:16px;font-weight:600;cursor:pointer;border:0;box-sizing:border-box;color:#fff;text-decoration:none;}' +
+      '.tga-btn{display:flex;align-items:center;justify-content:center;gap:.5em;min-height:52px;padding:.8em 1.2em;border-radius:14px;font-size:16px;font-weight:600;cursor:pointer;border:0;box-sizing:border-box;color:#fff;text-decoration:none;-webkit-appearance:none;appearance:none;font-family:inherit;line-height:inherit;}' +
       '.tga-btn svg{width:22px;height:22px;flex:0 0 auto;display:block;}' +
       '.tga-btn--primary{background:#2f9be3;box-shadow:0 6px 20px rgba(47,155,227,.35);}' +
       '.tga-btn--primary:hover{background:#2589cc;}' +
@@ -437,6 +440,7 @@
   }
 
   function removeOverlay() {
+    disarmGateKeys();
     if (overlay && overlay.parentNode) overlay.parentNode.removeChild(overlay);
     overlay = null;
   }
@@ -546,7 +550,7 @@
     // Кнопка Refresh удалена целиком (polling + Noty покрывают флоу);
     // actions-блок рендерится только если есть хоть одна кнопка.
     var openHtml = (hasBot && !isTVMode)
-      ? '<div class="tga-btn tga-btn--primary selector" id="tg-auth-gate-open" tabindex="0" role="button">' + SVG_PLANE + '<span class="tga-only-mob">' + escapeHtml(t('open')) + '</span><span class="tga-only-desk">' + escapeHtml(t('openDesktop')) + '</span></div>'
+      ? '<button type="button" class="tga-btn tga-btn--primary" id="tg-auth-gate-open">' + SVG_PLANE + '<span class="tga-only-mob">' + escapeHtml(t('open')) + '</span><span class="tga-only-desk">' + escapeHtml(t('openDesktop')) + '</span></button>'
       : '';
     var stepsPlainHtml = hasBot
       ? '<div class="tga-steps tga-steps--plain">' +
@@ -594,25 +598,57 @@
     // TV: кнопок не осталось (Open скрыт) — фокусить нечего,
     // QR-флоу полностью на polling; D-pad-навигации не требуется.
 
-    // Div-кнопки с tabindex фокусируются пультом/клавиатурой, но Enter по ним
-    // не стреляет click сам (как у <button>). Дублируем активацию клавишами,
-    // с keyCode-фолбэком для старых TV WebView без современного ev.key.
-    function armKeyActivation(btn) {
-      if (!btn) return;
-      btn.addEventListener('keydown', function (ev) {
-        var k = ev.key;
-        var kc = ev.keyCode;
-        if (k === 'Enter' || kc === 13 || k === ' ' || k === 'Spacebar' || kc === 32) {
-          try {
-            ev.preventDefault();
-          } catch (e) { }
-          try {
-            btn.click();
-          } catch (e2) { }
-        }
-      });
+    armGateKeys(openBtn);
+    if (openBtn) {
+      try { openBtn.focus(); } catch (e) { }
     }
-    armKeyActivation(openBtn);
+  }
+
+  // Lampa Keypad в конце своего глобального keydown делает preventDefault для всех
+  // клавиш кроме Enter, поэтому Tab/Space до оверлея не доходят. Перехватываем
+  // в capture-фазе на window (раньше bubble-слушателя ядра) и ведём фокус сами.
+  function armGateKeys(openBtn) {
+    disarmGateKeys();
+    gateKeyDown = function (ev) {
+      var k = ev.key;
+      var kc = ev.keyCode;
+      // Не трогаем браузерные шорткаты (Ctrl+Tab, Alt+Tab, Cmd+...).
+      if (ev.ctrlKey || ev.altKey || ev.metaKey) return;
+      var isTab = (k === 'Tab' || kc === 9);
+      var isAct = (k === 'Enter' || kc === 13 || k === ' ' || k === 'Spacebar' || kc === 32);
+      if (isTab) {
+        try { ev.preventDefault(); ev.stopPropagation(); } catch (e) { }
+        try {
+          if (openBtn && openBtn.focus) openBtn.focus();
+        } catch (e2) { }
+        return;
+      }
+      if (isAct) {
+        try { ev.preventDefault(); ev.stopPropagation(); } catch (e3) { }
+        if (!openBtn) return;
+        var now = Date.now();
+        if (now - gateActivateAt < 400) return;
+        gateActivateAt = now;
+        try { openBtn.click(); } catch (e4) { }
+      }
+    };
+    gateKeyUp = function (ev) {
+      var k = ev.key;
+      var kc = ev.keyCode;
+      if (ev.ctrlKey || ev.altKey || ev.metaKey) return;
+      if (k === 'Enter' || kc === 13 || k === ' ' || k === 'Spacebar' || kc === 32) {
+        // Гасим keyup, чтобы Lampa не вызвала Controller.enter() под оверлеем.
+        try { ev.preventDefault(); ev.stopPropagation(); } catch (e) { }
+      }
+    };
+    window.addEventListener('keydown', gateKeyDown, true);
+    window.addEventListener('keyup', gateKeyUp, true);
+  }
+  function disarmGateKeys() {
+    if (gateKeyDown) window.removeEventListener('keydown', gateKeyDown, true);
+    if (gateKeyUp) window.removeEventListener('keyup', gateKeyUp, true);
+    gateKeyDown = null;
+    gateKeyUp = null;
   }
 
   function startPolling() {
