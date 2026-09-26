@@ -81,8 +81,16 @@ public class ApiController : BaseController
     #region testaccsdb
     [HttpGet, HttpPost]
     [Route("/testaccsdb")]
-    public ActionResult TestAccsdb(string account_email, string uid)
+    public ActionResult TestAccsdb(string account_email, string uid, string probe = null)
     {
+        // probe=1 — read-only предпроверка состояния accsdb (живой ре-чек на клиенте).
+        // Ответ об отказе формирует middleware ДО контроллера, поэтому probe внутри
+        // TestAccsdb критичен именно для shared_passwd-ветки (middleware пропускает её
+        // к контроллеру). Probe обязан быть без side-effect'ов: не добавляем запись
+        // в users.json и не полагаемся на reconcile-дописку в память. Формат ответа
+        // probe — только состояние: {"accsdb": true|false}, без success/uid.
+        bool isProbe = probe == "1";
+
         // uid совпадает с shared_passwd, возвращаем команду изменить uid
         if (!string.IsNullOrEmpty(CoreInit.conf.accsdb.shared_passwd) && uid == CoreInit.conf.accsdb.shared_passwd)
             return Content("{\"accsdb\": true, \"newuid\": true}", "application/json; charset=utf-8");
@@ -108,6 +116,10 @@ public class ApiController : BaseController
                     (o["ids"] != null && o["ids"].Any(t => t.ToString().Equals(uid, StringComparison.OrdinalIgnoreCase)))
                 );
 
+                // probe: вернуть только состояние, без мутаций и без success/uid
+                if (isProbe)
+                    return Content(exists ? "{\"accsdb\": false}" : "{\"accsdb\": true}", "application/json; charset=utf-8");
+
                 if (exists)
                     return Content("{\"accsdb\": false}", "application/json; charset=utf-8");
 
@@ -131,7 +143,10 @@ public class ApiController : BaseController
         }
         #endregion
 
-        return Content("{\"accsdb\": false, \"success\": true}", "application/json; charset=utf-8");
+        // probe не должен выглядеть как успех: только состояние, без success/uid.
+        return isProbe
+            ? Content("{\"accsdb\": false}", "application/json; charset=utf-8")
+            : Content("{\"accsdb\": false, \"success\": true}", "application/json; charset=utf-8");
     }
     #endregion
 
