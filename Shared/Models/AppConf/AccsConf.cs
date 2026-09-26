@@ -40,42 +40,110 @@ public class AccsConf
 
     public ConcurrentBag<AccsUser> users { get; set; } = new ConcurrentBag<AccsUser>();
 
+    // Инвентаризация источников записей accsdb (Task 1.1):
+    //  1) корневой users.json (CWD процесса; в Docker /lampac/users.json) — файловое происхождение,
+    //     reconcile в Core.Program.UpdateUsersDb через ApplyFileSnapshot();
+    //  2) init.conf/init.yaml: accsdb.users[] (десериализация) + accounts{} (MergeAccounts) —
+    //     защищены _initUidKeys, reconcile их никогда не удаляет;
+    //  3) shared_passwd-флоу (/testaccsdb) пишет строку прямо в users.json — файловое происхождение,
+    //     отзывается reconcile при исчезновении строки из файла;
+    //  4) white_uids/domainId_pattern/bypass_accsdb — не записи users, в reconcile не участвуют.
+    // Нормализация ключей везде — ToLowerAndTrim() (как в RefreshUsers/findUser).
+    // accsdb.enable=false не очищает users/память и не останавливает reconcile (осознанно:
+    // дешевле держать память актуальной к моменту включения; middleware при этом пропускает всех).
 
-    private static IReadOnlyDictionary<string, AccsUser> _searchUsers;
+    // Синхронизация структурных изменений users и атомарной пересборки _searchUsers.
+    private readonly object _usersSync = new object();
+
+    // Снапшот _searchUsers — инстансное (не static) поле: при hot-reload старый инстанс
+    // не должен перезаписывать снапшот нового. Читатели видят либо старый, либо новый словарь.
+    private IReadOnlyDictionary<string, AccsUser> _searchUsers;
+
+    // Нормализованные ключи id/ids из init-источников (accsdb.users[] + accounts.Keys).
+    // Пересобирается RebuildInitUidKeys() из CoreInit.updateConf/updateYamlConf.
+    private HashSet<string> _initUidKeys = new HashSet<string>();
+
+    // Ключи последнего УСПЕШНО применённого users.json. null — снапшота ещё не было
+    // (bootstrap: первый reconcile после старта/смены инстанса ничего не удаляет).
+    // Hot-reload init.conf/init.yaml создаёт новый CoreInit => новый инстанс AccsConf с
+    // _fileUidKeys == null (bootstrap: первый reconcile не удаляет, состав файла подтянется
+    // ближайшим тиком). Core.Program._usersKeyAccs форсит reconcile при смене инстанса, а
+    // RebuildInitUidKeys() пересобирает _initUidKeys: из updateConf (свежий _tempConf) и из
+    // ApplyYamlReload (живой инстанс под _usersSync). Значения _fileUidKeys не переносятся между
+    // генерациями намеренно: слепой перенос мог бы воскресить уже удалённый uid.
+    private HashSet<string> _fileUidKeys;
 
     public void RefreshUsers()
     {
         try
         {
-            if (users == null || users.Count == 0)
+            IReadOnlyDictionary<string, AccsUser> snapshot = null;
+
+            if (users != null && users.Count > 0)
             {
-                _searchUsers = null;
-                return;
+                Dictionary<string, AccsUser> _users = new();
+
+                foreach (AccsUser u in users)
+                {
+                    if (u == null)
+                        continue;
+
+                    if (!string.IsNullOrEmpty(u.id))
+                        _users[u.id.ToLowerAndTrim()] = u;
+
+                    if (u.ids != null)
+                    {
+                        foreach (string uid in u.ids)
+                        {
+                            if (!string.IsNullOrEmpty(uid))
+                                _users[uid.ToLowerAndTrim()] = u;
+                        }
+                    }
+                }
+
+                snapshot = _users;
             }
 
-            Dictionary<string, AccsUser> _users = new();
+            lock (_usersSync)
+                _searchUsers = snapshot;
+        }
+        catch { }
+    }
 
-            foreach (AccsUser u in users)
+    /// <summary>
+    /// Пересобирает _initUidKeys из init-источников на момент вызова: accsdb.users[] + accounts.Keys.
+    /// clear+refill обязателен: updateYamlConf использует PopulateObject в тот же инстанс,
+    /// иначе удалённые из init ключи накапливались бы и защищали уже неактуальные записи.
+    /// </summary>
+    public void RebuildInitUidKeys()
+    {
+        var keys = new HashSet<string>();
+
+        if (users != null)
+        {
+            foreach (var u in users)
             {
                 if (u == null)
                     continue;
 
-                if (!string.IsNullOrEmpty(u.id))
-                    _users[u.id.ToLowerAndTrim()] = u;
+                AddUidKey(keys, u.id);
 
                 if (u.ids != null)
                 {
-                    foreach (string uid in u.ids)
-                    {
-                        if (!string.IsNullOrEmpty(uid))
-                            _users[uid.ToLowerAndTrim()] = u;
-                    }
+                    foreach (var id in u.ids)
+                        AddUidKey(keys, id);
                 }
             }
-
-            _searchUsers = _users;
         }
-        catch { }
+
+        if (accounts != null)
+        {
+            foreach (var account in accounts.Keys)
+                AddUidKey(keys, account);
+        }
+
+        lock (_usersSync)
+            _initUidKeys = keys;
     }
 
     public void MergeAccounts()
@@ -83,28 +151,345 @@ public class AccsConf
         if (accounts == null || accounts.Count == 0)
             return;
 
-        users ??= new ConcurrentBag<AccsUser>();
-
-        RefreshUsers();
-
-        foreach (var account in accounts)
+        lock (_usersSync)
         {
-            if (findUser(account.Key) is AccsUser user)
+            users ??= new ConcurrentBag<AccsUser>();
+
+            RefreshUsers();
+
+            foreach (var account in accounts)
             {
-                if (account.Value > user.expires)
-                    user.expires = account.Value;
-            }
-            else
-            {
-                users.Add(new AccsUser()
+                if (findUser(account.Key) is AccsUser user)
                 {
-                    id = account.Key.ToLowerAndTrim(),
-                    expires = account.Value
-                });
+                    if (account.Value > user.expires)
+                        user.expires = account.Value;
+                }
+                else
+                {
+                    users.Add(new AccsUser()
+                    {
+                        id = account.Key.ToLowerAndTrim(),
+                        expires = account.Value
+                    });
+                }
+            }
+
+            RefreshUsers();
+        }
+    }
+
+    /// <summary>
+    /// Hot-reload init.yaml на живом инстансе: populate + MergeAccounts + RebuildInitUidKeys
+    /// под _usersSync, чтобы тик UpdateUsersDb не успел добавить файловые записи в _initUidKeys.
+    /// </summary>
+    public void ApplyYamlReload(Action populate)
+    {
+        lock (_usersSync)
+        {
+            populate?.Invoke();
+            MergeAccounts();
+            RebuildInitUidKeys();
+        }
+    }
+
+    /// <summary>
+    /// Полный reconcile памяти по валидному снапшоту корневого users.json:
+    /// update существующих, add новых, затем удаление записей, которые одновременно
+    /// (а) были файловыми (все их ключи были в предыдущем _fileUidKeys),
+    /// (б) больше не встречаются в файле (ни один ключ не входит в новый fileKeySet) и
+    /// (в) не защищены init.conf (ни один ключ не входит в _initUidKeys).
+    /// Если у записи пропал только один алиас из ids при живом id — запись остаётся (update уже обновил поле).
+    /// </summary>
+    public void ApplyFileSnapshot(List<AccsUser> fileUsers)
+    {
+        if (fileUsers == null)
+            fileUsers = new List<AccsUser>();
+
+        var fileKeySet = new HashSet<string>();
+
+        foreach (var user in fileUsers)
+        {
+            if (user == null)
+                continue;
+
+            AddUidKey(fileKeySet, user.id);
+
+            if (user.ids != null)
+            {
+                foreach (var id in user.ids)
+                    AddUidKey(fileKeySet, id);
             }
         }
 
+        List<AccsUser> removed = null;
+        int added = 0;
+        // updated — число файловых записей, сопоставленных с существующими (не число реально изменившихся полей).
+        int updated = 0;
+
+        lock (_usersSync)
+        {
+            users ??= new ConcurrentBag<AccsUser>();
+
+            // bootstrap: первый успешный reconcile после старта/смены инстанса — без удалений,
+            // иначе стартовый тик снёс бы записи из init.conf.
+            bool bootstrap = _fileUidKeys == null;
+            HashSet<string> prevFileKeys = _fileUidKeys;
+            HashSet<string> initKeys = _initUidKeys ?? new HashSet<string>();
+
+            // update/add — прежняя семантика
+            foreach (var user in fileUsers)
+            {
+                if (user == null)
+                    continue;
+
+                try
+                {
+                    string lookup;
+                    if (user.id != null)
+                        lookup = user.id;
+                    else if (user.ids != null && user.ids.Count > 0)
+                        lookup = user.ids[0];
+                    else
+                        continue; // как раньше: запись без id/ids не добавлялась
+
+                    var find = findUser(lookup);
+                    if (find != null)
+                    {
+                        updated++;
+                        find.id = user.id;
+                        find.ids = user.ids;
+                        find.group = user.group;
+                        find.IsPasswd = user.IsPasswd;
+                        find.expires = user.expires;
+                        find.ban = user.ban;
+                        find.ban_msg = user.ban_msg;
+                        find.comment = user.comment;
+                        find.@params = user.@params;
+                    }
+                    else
+                    {
+                        added++;
+                        users.Add(user);
+                    }
+                }
+                catch (Exception ex)
+                {
+                    Serilog.Log.Error(ex, "{Class} {CatchId}", "Program", "id_85syu64t");
+                }
+            }
+
+            // remove — только бывшие файловые записи, не защищённые init
+            if (!bootstrap && prevFileKeys != null && prevFileKeys.Count > 0)
+            {
+                var current = users.ToList();
+
+                foreach (var u in current)
+                {
+                    var keys = UserKeys(u);
+                    if (keys.Count == 0)
+                        continue;
+
+                    if (keys.Any(k => initKeys.Contains(k)))
+                        continue;
+
+                    if (!keys.All(k => prevFileKeys.Contains(k)))
+                        continue;
+
+                    if (keys.Any(k => fileKeySet.Contains(k)))
+                        continue;
+
+                    (removed ??= new List<AccsUser>()).Add(u);
+                }
+
+                if (removed != null)
+                    users = new ConcurrentBag<AccsUser>(current.Except(removed));
+            }
+
+            // коммит состава файла — после успешного применения (в т.ч. для валидного [])
+            _fileUidKeys = fileKeySet;
+        }
+
         RefreshUsers();
+
+        // Warning — минимальный уровень файлового лога при serilog:true (Core/Program.cs),
+        // Log.Information не виден. Не понижать на Information.
+        // uids — только удалённые, максимум 5, хешированные (без plaintext uid).
+        if (added + updated + (removed?.Count ?? 0) > 0)
+        {
+            Serilog.Log.Warning("UsersDbReconcile added={Added} updated={Updated} removed={Removed} uids={Uids}",
+                added,
+                updated,
+                removed?.Count ?? 0,
+                string.Join(",", (removed ?? new List<AccsUser>()).Take(5).Select(u => CrypTo.md5((u.id ?? u.ids?.FirstOrDefault() ?? "unknown").ToLowerAndTrim()))));
+        }
+    }
+
+    private static void AddUidKey(HashSet<string> keys, string value)
+    {
+        if (string.IsNullOrEmpty(value))
+            return;
+
+        string key = value.ToLowerAndTrim();
+        if (!string.IsNullOrEmpty(key))
+            keys.Add(key);
+    }
+
+    private static HashSet<string> UserKeys(AccsUser user)
+    {
+        var keys = new HashSet<string>();
+
+        if (user == null)
+            return keys;
+
+        AddUidKey(keys, user.id);
+
+        if (user.ids != null)
+        {
+            foreach (var id in user.ids)
+                AddUidKey(keys, id);
+        }
+
+        return keys;
+    }
+
+    /// <summary>
+    /// Немедленное удаление uid из памяти accsdb (Sprint 2), без ожидания reconcile.
+    /// Пустой/null uid игнорируется, повторный вызов — no-op, исключений не бросает.
+    /// _fileUidKeys не трогаем: файл — источник истины, reconcile вернёт запись,
+    /// если она всё ещё есть в файле.
+    /// </summary>
+    public void RemoveUid(string uid)
+    {
+        if (string.IsNullOrWhiteSpace(uid))
+            return;
+
+        RemoveUids(new[] { uid });
+    }
+
+    /// <summary>
+    /// Пакетное удаление uid из памяти под _usersSync. Записи, у которых хотя бы один ключ
+    /// (id или ids) входит в _initUidKeys, не трогаются вовсе (как в ApplyFileSnapshot).
+    /// Записи с нормализованным id == uid удаляются целиком; у остальных uid вычищается из ids
+    /// (без учёта регистра); запись без id и ids после вычистки тоже удаляется. Затем users
+    /// пересобирается и вызывается RefreshUsers().
+    /// </summary>
+    public void RemoveUids(IEnumerable<string> uids)
+    {
+        if (uids == null)
+            return;
+
+        var keys = new HashSet<string>();
+        foreach (var uid in uids)
+        {
+            if (string.IsNullOrWhiteSpace(uid))
+                continue;
+
+            string key = uid.ToLowerAndTrim();
+            if (!string.IsNullOrEmpty(key))
+                keys.Add(key);
+        }
+
+        if (keys.Count == 0)
+            return;
+
+        // ключи, реально повлёкшие удаление (record по id или вычистка из ids) — для лога
+        var matched = new HashSet<string>();
+        bool changed = false;
+
+        lock (_usersSync)
+        {
+            if (users == null || users.Count == 0)
+                return;
+
+            var initKeys = _initUidKeys ?? new HashSet<string>();
+            var current = users.ToList();
+            var kept = new List<AccsUser>(current.Count);
+
+            foreach (var user in current)
+            {
+                if (user == null)
+                {
+                    changed = true;
+                    continue;
+                }
+
+                // record-level защита init-записей (как в ApplyFileSnapshot): если хотя бы один
+                // ключ записи пришёл из init.conf/accounts — запись не трогаем вовсе.
+                if (UserKeys(user).Any(k => initKeys.Contains(k)))
+                {
+                    kept.Add(user);
+                    continue;
+                }
+
+                // удаление записи по id
+                if (!string.IsNullOrEmpty(user.id)
+                    && keys.Contains(user.id.ToLowerAndTrim()))
+                {
+                    changed = true;
+                    matched.Add(user.id.ToLowerAndTrim());
+                    continue;
+                }
+
+                // вычистка удаляемых ключей из ids
+                bool idsChanged = false;
+                if (user.ids != null && user.ids.Count > 0)
+                {
+                    var newIds = new List<string>(user.ids.Count);
+
+                    foreach (var id in user.ids)
+                    {
+                        if (string.IsNullOrEmpty(id))
+                        {
+                            // пустой элемент не несём дальше, но фиксируем изменение, чтобы оно закоммитилось
+                            changed = true;
+                            idsChanged = true;
+                            continue;
+                        }
+
+                        string norm = id.ToLowerAndTrim();
+                        if (keys.Contains(norm))
+                        {
+                            changed = true;
+                            idsChanged = true;
+                            matched.Add(norm);
+                            continue;
+                        }
+
+                        newIds.Add(id);
+                    }
+
+                    if (newIds.Count != user.ids.Count)
+                        user.ids = newIds;
+                }
+
+                // если после вычистки у записи не осталось ни id, ни ids — удалить её.
+                // Проверяем только затронутые записи, чтобы не вычищать посторонние битые.
+                if (idsChanged && string.IsNullOrEmpty(user.id) && (user.ids == null || user.ids.Count == 0))
+                {
+                    changed = true;
+                    continue;
+                }
+
+                kept.Add(user);
+            }
+
+            if (!changed)
+                return;
+
+            users = new ConcurrentBag<AccsUser>(kept);
+        }
+
+        RefreshUsers();
+
+        // Warning — минимальный уровень файлового лога при serilog:true (Core/Program.cs),
+        // Log.Information здесь не виден. Не понижать обратно на Information.
+        // matched — ключи, реально повлёкшие удаление (id-match или вычистка из ids), максимум 5, хешированные.
+        if (matched.Count > 0)
+        {
+            Serilog.Log.Warning("UsersDbRemoveUid matched={Matched} uids={Uids}",
+                matched.Count,
+                string.Join(",", matched.Take(5).Select(k => CrypTo.md5(k))));
+        }
     }
 
     public AccsUser findUser(HttpContext httpContext, out string uid)

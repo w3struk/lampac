@@ -119,6 +119,9 @@ public class ApiController : BaseController
 
                 IO.File.WriteAllText(file, arr.ToString(Formatting.Indented));
 
+                // Запись добавляется только в файл (users.json — источник истины для accsdb).
+                // Прямого добавления в память здесь нет (осознанное решение, Sprint 2): доступ
+                // появится в памяти accsdb в течение ~2 с через reconcile UpdateUsersDb.
                 return Content("{\"accsdb\": false, \"success\": true, \"uid\": \"" + uid + "\"}", "application/json; charset=utf-8");
             }
             catch

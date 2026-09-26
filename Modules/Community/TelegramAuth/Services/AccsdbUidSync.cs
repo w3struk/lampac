@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using Newtonsoft.Json;
+using Shared;
 using Shared.Models.Base;
 using TelegramAuth.Models;
 
@@ -106,22 +107,27 @@ namespace TelegramAuth.Services
             var key = deviceUid.Trim();
             lock (FileLock)
             {
-                if (!File.Exists(Path.GetFullPath(UsersFileName)))
-                    return;
-
-                var list = ReadListUnlocked();
-                foreach (var u in list)
+                if (File.Exists(Path.GetFullPath(UsersFileName)))
                 {
-                    if (u.ids != null && u.ids.Count > 0)
-                        u.ids = u.ids.Where(id => !string.Equals(id, key, StringComparison.OrdinalIgnoreCase)).ToList();
+                    var list = ReadListUnlocked();
+                    foreach (var u in list)
+                    {
+                        if (u.ids != null && u.ids.Count > 0)
+                            u.ids = u.ids.Where(id => !string.Equals(id, key, StringComparison.OrdinalIgnoreCase)).ToList();
+                    }
+
+                    list = list
+                        .Where(u => u.id == null || !string.Equals(u.id, key, StringComparison.OrdinalIgnoreCase))
+                        .ToList();
+
+                    WriteListUnlocked(list);
                 }
-
-                list = list
-                    .Where(u => u.id == null || !string.Equals(u.id, key, StringComparison.OrdinalIgnoreCase))
-                    .ToList();
-
-                WriteListUnlocked(list);
             }
+
+            // Немедленное удаление из памяти accsdb (Sprint 2), не дожидаясь тика reconcile.
+            // Null-safe: модуль может работать при accsdb.enable=false или до инициализации конфига.
+            // Вызов вне FileLock: AccsConf синхронизируется собственным _usersSync, локи не пересекаются.
+            CoreInit.conf?.accsdb?.RemoveUid(key);
         }
 
         static void EnsureFileExistsUnlocked()
