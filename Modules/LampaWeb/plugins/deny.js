@@ -1,3 +1,9 @@
+(function () {
+'use strict';
+
+if (window.deny_accs_gate_loaded) return;
+window.deny_accs_gate_loaded = true;
+
 var network = new Lampa.Reguest();
 var api = Lampa.Utils.protocol() + Lampa.Manifest.cub_domain + '/api/';
 
@@ -168,6 +174,10 @@ function checkAutch() {
   network.silent(url, function(res) {
     if (res.accsdb) {
 
+      // Deny-экран показан — heartbeat здесь не работает (XOR-инвариант);
+      // стоп на случай повторного вызова checkAutch при активном heartbeat.
+      stopDenyHeartbeat();
+
       window.start_deep_link = {
         component: 'denypages',
         page: 1,
@@ -175,7 +185,7 @@ function checkAutch() {
       };
   
       if (res.newuid) {
-        unic_id = Lampa.Utils.uid(8).toLowerCase();
+        var unic_id = Lampa.Utils.uid(8).toLowerCase();
         Lampa.Storage.set('lampac_unic_id', unic_id);
       }
   
@@ -196,11 +206,259 @@ function checkAutch() {
       }
     } else {
       network.clear();
-      network = null;
+      // Разблокировано — страница живая: запускаем heartbeat живого ре-чека
+      // (read-only проба probe=1, см. ниже). network не зануляем, чтобы
+      // поздние network.clear() в addDevice не падали на null.
+      startDenyHeartbeat();
     }
   }, function() {
     //setTimeout(checkAutch, 1000 * 3);
+    // Ретрай 3 с не возвращаем осознанно: steady-state опрос каждые 3 с от
+    // всех клиентов = thundering herd на /testaccsdb. Вместо этого heartbeat
+    // ниже: база 60 с + джиттер ±30% (~1 запрос/мин/клиент), backoff ×2 до
+    // 5 мин при сетевых ошибках, relock после 2 подряд accsdb:true.
   });
 }
 
+// ── Heartbeat живого ре-чека (паритет с telegram_auth_gate.js, Phase 3) ──
+// Пока страница разблокирована, периодически проверяем accsdb read-only
+// пробой probe=1. Два подряд отказа → denyRelock (та же deny-последовательность,
+// что и при загрузке, но без перезагрузки). Сетевые ошибки отказом не считаются
+// (fail-open) и дают backoff. Инвариант «heartbeat XOR deny-экран»: heartbeat
+// работает ТОЛЬКО разблокированным; при показанном deny-экране стопается.
+var DENY_HEARTBEAT_BASE_MS = 60000;
+var DENY_HEARTBEAT_JITTER_RATIO = 0.3;
+var DENY_HEARTBEAT_BACKOFF_MAX_MS = 300000;
+var DENY_HEARTBEAT_WAKE_MIN_MS = 10000;
+var DENY_STATUS_TIMEOUT_MS = 8000;
+
+var denyHeartbeatTimer = null;
+var denyHeartbeatProbe = null;
+var denyHeartbeatInFlight = false;
+var denyHeartbeatActive = false;
+var denyHeartbeatFails = 0;
+var denyHeartbeatBackoffMs = 0;
+var denyHeartbeatLastTickAt = 0;
+var denyHeartbeatListenersBound = false;
+var denyRelocked = false;
+
+function denyCurrentLang() {
+  // Паритет с currentLang() в telegram_auth_gate.js: язык Lampa, иначе язык браузера.
+  var l = '';
+  try {
+    l = String(Lampa.Storage.get('language', '') || '');
+  } catch (e) { }
+  if (!l) {
+    try {
+      l = String(navigator.language || '');
+    } catch (e2) { }
+  }
+  return l.toLowerCase().indexOf('en') === 0 ? 'en' : 'ru';
+}
+
+function buildDenyProbeUrl() {
+  var url = '{localhost}/testaccsdb';
+
+  var email = Lampa.Storage.get('account_email');
+  if (email) url = Lampa.Utils.addUrlComponent(url, 'account_email=' + encodeURIComponent(email));
+
+  var uid = Lampa.Storage.get('lampac_unic_id', '');
+  if (uid) url = Lampa.Utils.addUrlComponent(url, 'uid=' + encodeURIComponent(uid));
+
+  url = Lampa.Utils.addUrlComponent(url, 'lang=' + encodeURIComponent(denyCurrentLang()));
+
+  var token = '{token}';
+  if (token) url = Lampa.Utils.addUrlComponent(url, 'token={token}');
+
+  url = Lampa.Utils.addUrlComponent(url, 'probe=1');
+  return url;
+}
+
+function denyRelock(res) {
+  // Guard от дублей: повторные тики отказа не плодят #loading-element/модалку.
+  if (denyRelocked) return;
+  denyRelocked = true;
+  stopDenyHeartbeat();
+
+  window.start_deep_link = {
+    component: 'denypages',
+    page: 1,
+    url: ''
+  };
+
+  if (res.newuid) {
+    var unic_id = Lampa.Utils.uid(8).toLowerCase();
+    Lampa.Storage.set('lampac_unic_id', unic_id);
+  }
+
+  window.sync_disable = true;
+  document.getElementById("app").style.display = "none";
+  // #loading-element мог остаться от загрузочной deny-ветки — переиспользуем,
+  // а не плодим дубли.
+  var pwait = document.getElementById("loading-element");
+  if (!pwait) {
+    pwait = document.createElement("div");
+    pwait.id = "loading-element";
+    pwait.style.fontSize = "xxx-large";
+    pwait.style.textAlign = "center";
+    pwait.style.marginTop = "2em";
+    document.body.appendChild(pwait);
+  }
+  pwait.innerHTML = res.denymsg || "please wait";
+
+  // denymsg-путь — тупик без recovery: показан только статический текст,
+  // модалка addDevice не открывается и повторных проб нет (известное
+  // ограничение, паритет с reLockAndShowGate в telegram_auth_gate.js —
+  // там denymsg-ветка тоже возвращается без оверлея и polling).
+  if (!res.denymsg) {
+    setTimeout(function() {
+      addDevice(res.msg);
+    }, 5000);
+  }
+}
+
+function scheduleNextDenyHeartbeat() {
+  if (denyHeartbeatTimer) {
+    clearTimeout(denyHeartbeatTimer);
+    denyHeartbeatTimer = null;
+  }
+  var base = denyHeartbeatBackoffMs > 0 ? denyHeartbeatBackoffMs : DENY_HEARTBEAT_BASE_MS;
+  var jitter = Math.floor(base * DENY_HEARTBEAT_JITTER_RATIO);
+  var delay = base;
+  if (jitter > 0) delay = base - jitter + Math.floor(Math.random() * (jitter * 2 + 1));
+  if (delay < 1000) delay = 1000;
+  denyHeartbeatTimer = setTimeout(denyHeartbeatTick, delay);
+}
+
+function denyHeartbeatTick() {
+  denyHeartbeatTimer = null;
+  if (denyHeartbeatInFlight) {
+    // Внеплановая проба уже в полёте — не роняем поток.
+    scheduleNextDenyHeartbeat();
+    return;
+  }
+
+  denyHeartbeatInFlight = true;
+  denyHeartbeatLastTickAt = Date.now();
+
+  // Переиспользуем один Reguest на все тики.
+  if (!denyHeartbeatProbe) {
+    try { denyHeartbeatProbe = new Lampa.Reguest(); } catch (e) { denyHeartbeatProbe = null; }
+  }
+  if (!denyHeartbeatProbe) {
+    denyHeartbeatInFlight = false;
+    scheduleNextDenyHeartbeat();
+    return;
+  }
+
+  try {
+    denyHeartbeatProbe.silent(
+      buildDenyProbeUrl(),
+      function (res) {
+        denyHeartbeatInFlight = false;
+        // Поздний колбэк после stop (Reguest.clear() не отменяет уже принятый
+        // ответ): без активного heartbeat таймер не воскрешаем.
+        if (!denyHeartbeatActive || denyRelocked) return;
+        if (res && res.accsdb) {
+          denyHeartbeatFails++;
+          if (denyHeartbeatFails >= 2) {
+            // Подтверждение отказа: два подряд — relock без перезагрузки.
+            denyRelock(res);
+            return;
+          }
+          // Первый отказ — только счётчик (анти-флап).
+          denyHeartbeatBackoffMs = 0;
+          scheduleNextDenyHeartbeat();
+          return;
+        }
+        denyHeartbeatFails = 0;
+        denyHeartbeatBackoffMs = 0;
+        scheduleNextDenyHeartbeat();
+      },
+      function () {
+        // Сетевая ошибка — не отказ: backoff ×2 (потолок 5 мин), без relock.
+        denyHeartbeatInFlight = false;
+        // Тот же guard, что в success-ветке: поздний колбэк после stop
+        // (Reguest.clear()) не должен воскрешать таймер.
+        if (!denyHeartbeatActive || denyRelocked) return;
+        if (denyHeartbeatBackoffMs > 0) {
+          denyHeartbeatBackoffMs = Math.min(denyHeartbeatBackoffMs * 2, DENY_HEARTBEAT_BACKOFF_MAX_MS);
+        } else {
+          denyHeartbeatBackoffMs = Math.min(DENY_HEARTBEAT_BASE_MS * 2, DENY_HEARTBEAT_BACKOFF_MAX_MS);
+        }
+        scheduleNextDenyHeartbeat();
+      },
+      false,
+      { timeout: DENY_STATUS_TIMEOUT_MS }
+    );
+  } catch (e2) {
+    // Синхронный throw — не залипаем в inFlight.
+    denyHeartbeatInFlight = false;
+    scheduleNextDenyHeartbeat();
+  }
+}
+
+function denyHeartbeatWakeCheck() {
+  // Внеплановая проба (visible/focus): только в активном heartbeat, запрос
+  // не в полёте и с последнего тика прошло больше дебаунса.
+  if (!denyHeartbeatActive || denyRelocked || denyHeartbeatInFlight) return;
+  if (Date.now() - denyHeartbeatLastTickAt < DENY_HEARTBEAT_WAKE_MIN_MS) return;
+  if (denyHeartbeatTimer) {
+    clearTimeout(denyHeartbeatTimer);
+    denyHeartbeatTimer = null;
+  }
+  denyHeartbeatTick();
+}
+
+function onDenyHeartbeatVisible() {
+  if (document.visibilityState !== 'visible') return;
+  denyHeartbeatWakeCheck();
+}
+
+function onDenyHeartbeatFocus() {
+  denyHeartbeatWakeCheck();
+}
+
+function startDenyHeartbeat() {
+  // Идемпотентно: второго потока не появится даже при повторном вызове;
+  // после relock не перезапускаемся.
+  if (denyRelocked) return;
+  stopDenyHeartbeat();
+  denyHeartbeatActive = true;
+  denyHeartbeatLastTickAt = Date.now();
+  if (!denyHeartbeatListenersBound) {
+    document.addEventListener('visibilitychange', onDenyHeartbeatVisible);
+    window.addEventListener('focus', onDenyHeartbeatFocus);
+    denyHeartbeatListenersBound = true;
+  }
+  scheduleNextDenyHeartbeat();
+}
+
+function stopDenyHeartbeat() {
+  denyHeartbeatActive = false;
+  if (denyHeartbeatTimer) {
+    clearTimeout(denyHeartbeatTimer);
+    denyHeartbeatTimer = null;
+  }
+  denyHeartbeatInFlight = false;
+  denyHeartbeatFails = 0;
+  denyHeartbeatBackoffMs = 0;
+  if (denyHeartbeatProbe) {
+    try { denyHeartbeatProbe.clear(); } catch (e3) { }
+    denyHeartbeatProbe = null;
+  }
+  if (denyHeartbeatListenersBound) {
+    document.removeEventListener('visibilitychange', onDenyHeartbeatVisible);
+    window.removeEventListener('focus', onDenyHeartbeatFocus);
+    denyHeartbeatListenersBound = false;
+  }
+}
+
+// Уход страницы: гасим таймер и чистим probe-инстанс. Слушатель ставится
+// один раз — файл исполняется единожды (см. deny_accs_gate_loaded выше).
+window.addEventListener('pagehide', function () {
+  stopDenyHeartbeat();
+});
+
 checkAutch();
+})();
