@@ -25,6 +25,7 @@
   var gateActivateAt = 0;
   var pollTimer = null;
   var authorized = false;
+  var probeInFlight = false;
   var accsNetwork = new Lampa.Reguest();
   var accsdbAuthHint = '';
 
@@ -659,6 +660,49 @@
   }
 
   function handleAuthorized(uid, result) {
+    // Проба уже в полёте — не дублируем (повторные checkAccess(true) игнорируем).
+    if (probeInFlight) return;
+    probeInFlight = true;
+
+    try {
+      // Отдельный Reguest: accsNetwork зануляется после успеха checkAutch.
+      // probe=1 — read-only предпроверка accsdb перед разблокировкой.
+      var probeNetwork = new Lampa.Reguest();
+    probeNetwork.silent(
+      buildTestaccsdbRequestUrl() + '&probe=1',
+      function (res) {
+        probeInFlight = false;
+
+        if (res && (res.accsdb === true || res.newuid === true)) {
+          // accsdb отказывает (расхождение с /tg/auth/status): отменяем success-путь,
+          // иначе unlock → reload → deny → гейт = цикл. Остаёмся в гейте и поллим.
+          if (res.newuid) applyServerNewUid(res);
+          accsdbAuthHint = (res.msg || accsdbAuthHint);
+          lockApp();
+          buildOverlay(uid, res.msg || accsdbAuthHint || t('hintDefault'));
+          startPolling();
+          return;
+        }
+
+        completeAuthorized(uid, result);
+      },
+      function () {
+        // Сетевая ошибка пробы — консервативно не блокируем вход.
+        probeInFlight = false;
+        completeAuthorized(uid, result);
+      },
+      false,
+      { timeout: CONFIG.statusTimeoutMs }
+      );
+    } catch (e) {
+      // Синхронный throw (Lampa.Reguest/Storage/Utils недоступны) — fail-open,
+      // иначе probeInFlight залипнет и вход умрёт до перезагрузки.
+      probeInFlight = false;
+      completeAuthorized(uid, result);
+    }
+  }
+
+  function completeAuthorized(uid, result) {
     postDeviceDisplayName(uid);
 
     try {
