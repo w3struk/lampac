@@ -399,8 +399,13 @@ public class Program
             List<AccsUser> fileUsers;
             try
             {
+                // файл могут писать внешние инструменты/старые версии AdminPanel с BOM — срезаем его перед парсингом
+                string json = Encoding.UTF8.GetString(fileBytes);
+                if (json.Length > 0 && json[0] == '\uFEFF')
+                    json = json.Substring(1);
+
                 // битый JSON: fail-open — память и ключи не коммитим, ретрай на следующем тике
-                fileUsers = JsonConvert.DeserializeObject<List<AccsUser>>(Encoding.UTF8.GetString(fileBytes));
+                fileUsers = JsonConvert.DeserializeObject<List<AccsUser>>(json);
             }
             catch (Exception ex)
             {

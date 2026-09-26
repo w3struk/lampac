@@ -20,6 +20,10 @@ public class AdminPanelController : BaseController
     const string CurrentFile = "current.conf";
     const string UsersFile = "users.json";
 
+    // BOM-less UTF-8: Newtonsoft-реконсайлер в Core/Program.cs читает users.json как сырые байты,
+    // BOM ломает парсинг (\uFEFF в начале строки).
+    static readonly Encoding Utf8NoBom = new UTF8Encoding(false);
+
     [HttpGet]
     [AllowAnonymous]
     [Route("/adminpanel/auth")]
@@ -339,7 +343,7 @@ public class AdminPanelController : BaseController
     static async Task WriteUsersAtomicAsync(string formatted)
     {
         var tmp = UsersFile + ".tmp";
-        await System.IO.File.WriteAllTextAsync(tmp, formatted, Encoding.UTF8).ConfigureAwait(false);
+        await System.IO.File.WriteAllTextAsync(tmp, formatted, Utf8NoBom).ConfigureAwait(false);
         try
         {
             try
@@ -348,7 +352,7 @@ public class AdminPanelController : BaseController
             }
             catch (IOException ex) when (IsReplaceTargetBusy(ex))
             {
-                await System.IO.File.WriteAllTextAsync(UsersFile, formatted, Encoding.UTF8).ConfigureAwait(false);
+                await System.IO.File.WriteAllTextAsync(UsersFile, formatted, Utf8NoBom).ConfigureAwait(false);
             }
         }
         finally
