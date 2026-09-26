@@ -950,7 +950,6 @@
 
   function installAjaxHook() {
     if (ajaxHookInstalled) return;
-    ajaxHookInstalled = true;
     var origAjax;
     try {
       if (typeof $ === 'undefined' || !$ || typeof $.ajax !== 'function') {
@@ -1034,6 +1033,9 @@
       } catch (e3) { }
       return jq;
     };
+    // Флаг — только после успешной подмены: если $ подтянется позже,
+    // повторный вызов installAjaxHook получит второй шанс.
+    ajaxHookInstalled = true;
   }
 
   function handleAuthorized(uid, result) {
