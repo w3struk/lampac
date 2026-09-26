@@ -856,8 +856,10 @@
       return;
     }
 
-    accsdbAuthHint = res && res.msg ? String(res.msg) : accsdbAuthHint;
-    buildOverlay(getUID(), (res && res.msg) || accsdbAuthHint || t('hintDefault'));
+    // Relock показывает стандартное стартовое окно авторизации, а не текст
+    // отказа accsdb: buildOverlay без сообщения рендерит дефолтный sub.
+    // accsdbAuthHint здесь не обновляем, чтобы deny-текст не всплывал позже.
+    buildOverlay(getUID());
     startPolling();
   }
 
@@ -1055,10 +1057,10 @@
         if (res && (res.accsdb === true || res.newuid === true)) {
           // accsdb отказывает (расхождение с /tg/auth/status): отменяем success-путь,
           // иначе unlock → reload → deny → гейт = цикл. Остаёмся в гейте и поллим.
+          // Показываем стандартное стартовое окно, а не текст отказа accsdb.
           if (res.newuid) applyServerNewUid(res);
-          accsdbAuthHint = (res.msg || accsdbAuthHint);
           lockApp();
-          buildOverlay(uid, res.msg || accsdbAuthHint || t('hintDefault'));
+          buildOverlay(uid);
           startPolling();
           return;
         }

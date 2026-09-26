@@ -83,6 +83,9 @@ test('loop fix: status ok + accsdb deny -> success не показывается
   await expect(overlay(page)).toBeVisible();
   await expect(page.locator('.tga-ok')).toBeHidden();
   expect(await bootedAt(page)).toBe(t0); // reload не было
+  // Стандартное стартовое окно: дефолтный sub, без текста отказа accsdb.
+  await expect(overlay(page)).not.toContainText('denied');
+  await expect(overlay(page)).toContainText('Безопасно войди');
 });
 
 test('heartbeat: отзыв доступа -> гейт сам, без reload', async ({ page }) => {
@@ -98,6 +101,9 @@ test('heartbeat: отзыв доступа -> гейт сам, без reload', a
   await expect(overlay(page)).toBeVisible();
   await expect(page.locator('.tga-ok')).toBeHidden();
   expect(await bootedAt(page)).toBe(t0);
+  // Relock показывает стартовое окно, а не текст отказа accsdb.
+  await expect(overlay(page)).not.toContainText('denied');
+  await expect(overlay(page)).toContainText('Безопасно войди');
 });
 
 test('heartbeat: без отзыва гейт не появляется', async ({ page }) => {
