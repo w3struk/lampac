@@ -12,11 +12,7 @@
     checkIntervalMs: 10000,
     statusTimeoutMs: 8000,
     successOverlayMs: 1600,
-    testaccsdbTpl: '{localhost}/testaccsdb',
-    footerLines: [
-      'Почти внутри — остался один шаг',
-      'Сейчас впустим тебя внутрь'
-    ]
+    testaccsdbTpl: '{localhost}/testaccsdb'
   };
 
   var ORIGIN = location.protocol + '//' + location.host;
@@ -100,7 +96,12 @@
       okUser: 'confirmed via Telegram',
       okNote: 'This screen will close automatically.',
       unav1: 'Telegram login is temporarily unavailable.',
-      unav2: 'Contact your server administrator.'
+      unav2: 'Contact your server administrator.',
+      foot: ['Almost there — one step left', 'Letting you in now'],
+      hintDefault: 'Confirm the device via the Telegram bot.',
+      errStatus: 'Could not verify authorization. The server is unavailable.',
+      notyPending: 'Device is not authorized yet',
+      notyErr: 'Could not verify authorization'
     },
     ru: {
       title: 'Вход через Telegram',
@@ -118,7 +119,12 @@
       okUser: 'подтверждён через Telegram',
       okNote: 'Экран закроется автоматически.',
       unav1: 'Авторизация через Telegram временно недоступна.',
-      unav2: 'Обратись к администратору сервера.'
+      unav2: 'Обратись к администратору сервера.',
+      foot: ['Почти внутри — остался один шаг', 'Сейчас впустим тебя внутрь'],
+      hintDefault: 'Подтвердите устройство через Telegram-бота.',
+      errStatus: 'Не удалось проверить авторизацию. Сервер недоступен.',
+      notyPending: 'Устройство ещё не авторизовано',
+      notyErr: 'Не удалось проверить авторизацию'
     }
   };
 
@@ -321,7 +327,7 @@
   function requestStatus(uid, onSuccess, onError) {
     var network = new Lampa.Reguest();
     network.silent(
-      STATUS_URL + '?uid=' + encodeURIComponent(uid),
+      STATUS_URL + '?uid=' + encodeURIComponent(uid) + '&lang=' + encodeURIComponent(currentLang()),
       function (result) {
         onSuccess(result || {});
       },
@@ -519,7 +525,7 @@
       tgUrl = 'https://t.me/' + encodeURIComponent(bot) + '?start=' + encodeURIComponent(uid);
       qrUrl = 'https://api.qrserver.com/v1/create-qr-code/?size=220x220&data=' + encodeURIComponent(tgUrl);
     }
-    var footArr = CONFIG.footerLines;
+    var footArr = t('foot') || [];
     var footerMessage = footArr.length ? footArr[Math.floor(Math.random() * footArr.length)] : '';
     var msgHtml = escapeHtml(message || '');
 
@@ -639,7 +645,7 @@
     var hint =
       (result && result.message) ||
       accsdbAuthHint ||
-      'Подтвердите устройство через Telegram-бота.';
+      t('hintDefault');
     buildOverlay(uid, hint);
     startPolling();
   }
@@ -653,12 +659,12 @@
       } else {
         handleUnauthorized(uid, result);
         if (forceNotify) {
-          Lampa.Noty.show((result && result.message) || 'Устройство ещё не авторизовано');
+          Lampa.Noty.show((result && result.message) || t('notyPending'));
         }
       }
     }, function () {
-      handleUnauthorized(uid, { message: 'Не удалось проверить авторизацию. Сервер недоступен.' });
-      if (forceNotify) Lampa.Noty.show('Не удалось проверить авторизацию');
+      handleUnauthorized(uid, { message: t('errStatus') });
+      if (forceNotify) Lampa.Noty.show(t('notyErr'));
     });
   }
 
@@ -697,6 +703,7 @@
     if (email) url = Lampa.Utils.addUrlComponent(url, 'account_email=' + encodeURIComponent(email));
     var uid0 = Lampa.Storage.get(CONFIG.lsUidKey, '');
     if (uid0) url = Lampa.Utils.addUrlComponent(url, 'uid=' + encodeURIComponent(uid0));
+    url = Lampa.Utils.addUrlComponent(url, 'lang=' + encodeURIComponent(currentLang()));
     url = Lampa.Utils.addUrlComponent(url, 'token={token}');
     return url;
   }

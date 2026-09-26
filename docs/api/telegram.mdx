@@ -29,8 +29,12 @@ keywords: ["TelegramAuth API", "tg-notify", "api/tg", "bind/complete"]
   UID устройства Lampa для `/tg/auth/status`.
 </ParamField>
 
+<ParamField query="lang" type="string" default="ru">
+  Язык сообщений статуса: `ru` или `en`. Любое другое значение даёт `ru`.
+</ParamField>
+
 ```bash
-curl -fsS "http://127.0.0.1:9118/tg/auth/status?uid=DEVICE_UID"
+curl -fsS "http://127.0.0.1:9118/tg/auth/status?uid=DEVICE_UID&lang=en"
 ```
 
 ## Tg-notify.bot

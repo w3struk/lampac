@@ -67,6 +67,8 @@ TelegramAuth хранит пользователей и устройства, о
 
 `telegram_auth_gate.js` показывает fullscreen overlay (UID, кнопка Telegram, QR на крупных экранах), опрашивает `/tg/auth/status` и после успеха сохраняет `tg_auth_user` в `Lampa.Storage`.
 
+Вместе с запросами `/tg/auth/status` и `/testaccsdb` гейт отправляет выбранный язык интерфейса Lampa (`lang=ru|en`), поэтому сообщения статуса приходят на языке клиента. Без параметра сервер отвечает по-русски.
+
 <Warning>
   Если `telegram_auth_gate.js` подключён и через `customPlugins`, и инжектится LampaWeb, возникнет двойной опрос `/testaccsdb`. Используйте только один путь.
 </Warning>

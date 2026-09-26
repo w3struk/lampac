@@ -32,12 +32,12 @@ namespace TelegramAuth.Controllers
         [HttpGet]
         [AllowAnonymous]
         [Route("/tg/auth/status")]
-        public ActionResult Status([FromQuery] string uid)
+        public ActionResult Status([FromQuery] string uid, [FromQuery] string? lang)
         {
             if (string.IsNullOrWhiteSpace(uid))
                 return JsonError(400, "uid is required");
 
-            var status = store.GetStatus(uid);
+            var status = store.GetStatus(uid, lang);
             return JsonOk(status);
         }
 

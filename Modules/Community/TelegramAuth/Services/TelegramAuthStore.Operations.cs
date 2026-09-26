@@ -345,7 +345,21 @@ namespace TelegramAuth.Services
             return outcome;
         }
 
-        public AuthStatusResponse GetStatus(string uid)
+        /// <summary>Локализация сообщений гейта. ru — по умолчанию, en — при lang, начинающемся с "en".</summary>
+        private static string GateMessage(string? lang, string key)
+        {
+            bool en = (lang ?? "").Trim().ToLowerInvariant().StartsWith("en");
+            return key switch
+            {
+                "device_not_bound" => en ? "This device is not linked yet. Log in via Telegram." : "Устройство не привязано. Нужна авторизация через Telegram.",
+                "registration_pending" => en ? "The account is awaiting administrator approval." : "Аккаунт ожидает подтверждения администратора.",
+                "disabled" => en ? "Access was disabled by the administrator." : "Доступ отключён администратором.",
+                "expired" => en ? "Access has expired." : "Срок доступа истёк.",
+                _ => ""
+            };
+        }
+
+        public AuthStatusResponse GetStatus(string uid, string? lang = null)
         {
             var user = FindByUid(uid);
             if (user == null)
@@ -354,7 +368,7 @@ namespace TelegramAuth.Services
                 {
                     Authorized = false,
                     Pending = true,
-                    Message = "Устройство не привязано. Нужна авторизация через Telegram."
+                    Message = GateMessage(lang, "device_not_bound")
                 };
             }
 
@@ -366,7 +380,7 @@ namespace TelegramAuth.Services
                     Authorized = false,
                     Pending = true,
                     RegistrationPending = true,
-                    Message = "Аккаунт ожидает подтверждения администратора.",
+                    Message = GateMessage(lang, "registration_pending"),
                     TelegramId = user.TelegramId,
                     Username = user.TgUsername,
                     Role = user.Role,
@@ -382,7 +396,7 @@ namespace TelegramAuth.Services
                     Authorized = false,
                     Pending = false,
                     RegistrationPending = false,
-                    Message = "Доступ отключён администратором.",
+                    Message = GateMessage(lang, "disabled"),
                     TelegramId = user.TelegramId,
                     Username = user.TgUsername,
                     Role = user.Role,
@@ -397,7 +411,7 @@ namespace TelegramAuth.Services
                 Authorized = !expired,
                 Pending = false,
                 RegistrationPending = false,
-                Message = expired ? "Срок доступа истёк." : "OK",
+                Message = expired ? GateMessage(lang, "expired") : "OK",
                 TelegramId = user.TelegramId,
                 Username = user.TgUsername,
                 Role = user.Role,
