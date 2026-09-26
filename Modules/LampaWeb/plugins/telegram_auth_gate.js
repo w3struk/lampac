@@ -12,7 +12,11 @@
     checkIntervalMs: 10000,
     statusTimeoutMs: 8000,
     successOverlayMs: 1600,
-    testaccsdbTpl: '{localhost}/testaccsdb'
+    testaccsdbTpl: '{localhost}/testaccsdb',
+    heartbeatBaseMs: 60000,
+    heartbeatJitterRatio: 0.3,
+    heartbeatBackoffMaxMs: 300000,
+    heartbeatWakeMinMs: 10000
   };
 
   var ORIGIN = location.protocol + '//' + location.host;
@@ -28,6 +32,13 @@
   var probeInFlight = false;
   var accsNetwork = new Lampa.Reguest();
   var accsdbAuthHint = '';
+  var heartbeatTimer = null;
+  var heartbeatProbe = null;
+  var heartbeatInFlight = false;
+  var heartbeatFails = 0;
+  var heartbeatBackoffMs = 0;
+  var heartbeatLastTickAt = 0;
+  var heartbeatListenersBound = false;
 
   // Детект TV: Android TV, Tizen, webOS, Orsay, NetCast — через
   // Lampa.Platform + UA-маркеры. Используется для TV-режима
@@ -659,6 +670,191 @@
     }, CONFIG.checkIntervalMs);
   }
 
+  // ── Heartbeat живого ре-чека ──────────────────────────────────────────
+  // Пока страница разблокирована, периодически (base ± jitter) проверяем
+  // accsdb read-only пробой probe=1. Два подряд отказа → reLockAndShowGate.
+  // Сетевые ошибки отказом не считаются (fail-open) и дают backoff.
+  // Инвариант: heartbeat работает ТОЛЬКО разблокированным, polling — только
+  // пока показан гейт.
+
+  function clearHeartbeatProbe() {
+    if (heartbeatProbe) {
+      try { heartbeatProbe.clear(); } catch (e) { }
+      heartbeatProbe = null;
+    }
+  }
+
+  function detachHeartbeatListeners() {
+    if (!heartbeatListenersBound) return;
+    document.removeEventListener('visibilitychange', onHeartbeatVisible);
+    window.removeEventListener('focus', onHeartbeatFocus);
+    heartbeatListenersBound = false;
+  }
+
+  function attachHeartbeatListeners() {
+    if (heartbeatListenersBound) return;
+    document.addEventListener('visibilitychange', onHeartbeatVisible);
+    window.addEventListener('focus', onHeartbeatFocus);
+    heartbeatListenersBound = true;
+  }
+
+  function heartbeatWakeCheck() {
+    // Внеплановая проба (visible/focus): только когда разблокировано, запрос
+    // не в полёте и с последнего тика прошло больше дебаунса — иначе каждое
+    // переключение вкладки = лишний запрос.
+    if (!authorized || heartbeatInFlight) return;
+    if (Date.now() - heartbeatLastTickAt < CONFIG.heartbeatWakeMinMs) return;
+    if (heartbeatTimer) {
+      clearTimeout(heartbeatTimer);
+      heartbeatTimer = null;
+    }
+    heartbeatTick();
+  }
+
+  function onHeartbeatVisible() {
+    if (document.visibilityState !== 'visible') return;
+    heartbeatWakeCheck();
+  }
+
+  function onHeartbeatFocus() {
+    heartbeatWakeCheck();
+  }
+
+  function scheduleNextHeartbeat() {
+    if (heartbeatTimer) {
+      clearTimeout(heartbeatTimer);
+      heartbeatTimer = null;
+    }
+    var base = heartbeatBackoffMs > 0 ? heartbeatBackoffMs : CONFIG.heartbeatBaseMs;
+    var jitter = Math.floor(base * CONFIG.heartbeatJitterRatio);
+    var delay = base;
+    if (jitter > 0) delay = base - jitter + Math.floor(Math.random() * (jitter * 2 + 1));
+    if (delay < 1000) delay = 1000;
+    heartbeatTimer = setTimeout(heartbeatTick, delay);
+  }
+
+  function heartbeatTick() {
+    heartbeatTimer = null;
+    if (heartbeatInFlight) {
+      // Защита от наложения (внеплановая проба уже в полёте) — не роняем поток.
+      scheduleNextHeartbeat();
+      return;
+    }
+
+    heartbeatInFlight = true;
+    heartbeatLastTickAt = Date.now();
+
+    // Переиспользуем один Reguest на все тики (не плодим объект каждые 60 с).
+    if (!heartbeatProbe) {
+      try { heartbeatProbe = new Lampa.Reguest(); } catch (e) { heartbeatProbe = null; }
+    }
+    if (!heartbeatProbe) {
+      heartbeatInFlight = false;
+      scheduleNextHeartbeat();
+      return;
+    }
+
+    try {
+      heartbeatProbe.silent(
+        buildTestaccsdbRequestUrl() + '&probe=1',
+        function (res) {
+          heartbeatInFlight = false;
+          if (res && res.accsdb === true) {
+            heartbeatFails++;
+            if (heartbeatFails >= 2) {
+              // Требование «подтверждение отказа»: два подряд.
+              reLockAndShowGate(res);
+              return;
+            }
+            // Первый отказ — только счётчик (анти-флап, reconcile ~2 с).
+            heartbeatBackoffMs = 0;
+            scheduleNextHeartbeat();
+            return;
+          }
+          heartbeatFails = 0;
+          heartbeatBackoffMs = 0;
+          scheduleNextHeartbeat();
+        },
+        function () {
+          // Сетевая ошибка — не отказ: backoff ×2 (потолок 5 мин), без гейта.
+          // heartbeatFails не сбрасываем: «2 подряд» = два явных accsdb:true,
+          // сетевые ошибки между ними счётчик не обнуляют (осознанная семантика).
+          heartbeatInFlight = false;
+          if (heartbeatBackoffMs > 0) {
+            heartbeatBackoffMs = Math.min(heartbeatBackoffMs * 2, CONFIG.heartbeatBackoffMaxMs);
+          } else {
+            heartbeatBackoffMs = Math.min(CONFIG.heartbeatBaseMs * 2, CONFIG.heartbeatBackoffMaxMs);
+          }
+          scheduleNextHeartbeat();
+        },
+        false,
+        { timeout: CONFIG.statusTimeoutMs }
+      );
+    } catch (e) {
+      // Синхронный throw — не залипаем в inFlight.
+      heartbeatInFlight = false;
+      scheduleNextHeartbeat();
+    }
+  }
+
+  function startHeartbeat() {
+    // Идемпотентно: прежний таймер/слушатели/проба снимаются, второго потока
+    // не появится даже при повторном вызове.
+    stopHeartbeat();
+    authorized = true;
+    heartbeatLastTickAt = Date.now();
+    attachHeartbeatListeners();
+    scheduleNextHeartbeat();
+  }
+
+  function stopHeartbeat() {
+    if (heartbeatTimer) {
+      clearTimeout(heartbeatTimer);
+      heartbeatTimer = null;
+    }
+    heartbeatInFlight = false;
+    heartbeatFails = 0;
+    heartbeatBackoffMs = 0;
+    clearHeartbeatProbe();
+    detachHeartbeatListeners();
+  }
+
+  function reLockAndShowGate(res) {
+    // Первым делом гасим heartbeat, иначе тики будут дублировать relock.
+    stopHeartbeat();
+
+    applyServerNewUid(res);
+
+    window.sync_disable = true;
+    // Сброс флага, иначе тик polling `if (!authorized) checkAccess(false)` не сработает.
+    authorized = false;
+
+    var appEl = document.getElementById('app');
+    if (appEl) appEl.style.display = 'none';
+
+    lockApp();
+
+    if (res && res.denymsg) {
+      // Паритет с onAccsdbRequiresAuth: denymsg показываем в #loading-element,
+      // без оверлея. Guard от дубля при повторном relock.
+      var pwait = document.getElementById('loading-element');
+      if (!pwait) {
+        pwait = document.createElement('div');
+        pwait.id = 'loading-element';
+        document.body.appendChild(pwait);
+      }
+      pwait.style.fontSize = 'xxx-large';
+      pwait.style.textAlign = 'center';
+      pwait.style.marginTop = '2em';
+      pwait.innerHTML = res.denymsg;
+      return;
+    }
+
+    accsdbAuthHint = res && res.msg ? String(res.msg) : accsdbAuthHint;
+    buildOverlay(getUID(), (res && res.msg) || accsdbAuthHint || t('hintDefault'));
+    startPolling();
+  }
+
   function handleAuthorized(uid, result) {
     // Проба уже в полёте — не дублируем (повторные checkAccess(true) игнорируем).
     if (probeInFlight) return;
@@ -684,6 +880,9 @@
           return;
         }
 
+        // После успешной пробы heartbeat стартует и здесь (до unlock/reload);
+        // на свежей странице его перезапустит checkAutch-ветка «accsdb разрешил».
+        startHeartbeat();
         completeAuthorized(uid, result);
       },
       function () {
@@ -721,6 +920,7 @@
   }
 
   function handleUnauthorized(uid, result) {
+    stopHeartbeat();
     lockApp();
     var hint =
       (result && result.message) ||
@@ -755,6 +955,7 @@
   function onAccsdbRequiresAuth(res) {
     // Не выставляем start_deep_link на denypages: ядро Lampa тогда пишет в URL
     // ?component=denypages&page=1 и открывает экран deny; здесь достаточно оверлея и скрытого #app.
+    stopHeartbeat();
 
     applyServerNewUid(res);
 
@@ -797,6 +998,8 @@
         } else {
           accsNetwork.clear();
           accsNetwork = null;
+          // accsdb разрешил — страница живая и разблокирована: запускаем heartbeat.
+          startHeartbeat();
         }
       },
       function () { }
@@ -814,6 +1017,15 @@
       });
     }
   }
+
+  // Уход страницы (BFCache/закрытие WebView): гасим оба таймера и чистим
+  // probe-инстанс. Слушатель ставится один раз — модуль исполняется единожды.
+  function handlePageHide() {
+    stopHeartbeat();
+    stopPolling();
+    clearHeartbeatProbe();
+  }
+  window.addEventListener('pagehide', handlePageHide);
 
   scheduleCheckAutch();
 })();
