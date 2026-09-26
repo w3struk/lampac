@@ -97,7 +97,7 @@ namespace TelegramAuth.Services.Bot
             var (ok, detail) = await _api.ReactivateDeviceAsync(tgId, uid, ct).ConfigureAwait(false);
             await bot.AnswerCallbackQuery(cq.Id, cancellationToken: ct).ConfigureAwait(false);
             if (ok)
-                await bot.EditMessageText(cq.Message.Chat.Id, cq.Message.MessageId, $"Устройство <code>{EscapeHtml(uid)}</code> снова активно. Открой приложение и при необходимости нажми «Проверить снова».", parseMode: ParseMode.Html, cancellationToken: ct).ConfigureAwait(false);
+                await bot.EditMessageText(cq.Message.Chat.Id, cq.Message.MessageId, $"Устройство <code>{EscapeHtml(uid)}</code> снова активно. Открой приложение — вход выполнится автоматически.", parseMode: ParseMode.Html, cancellationToken: ct).ConfigureAwait(false);
             else
                 await bot.EditMessageText(cq.Message.Chat.Id, cq.Message.MessageId, "Не удалось включить устройство.\n" + TruncateForTelegram(StripJsonError(detail), 500), cancellationToken: ct).ConfigureAwait(false);
         }

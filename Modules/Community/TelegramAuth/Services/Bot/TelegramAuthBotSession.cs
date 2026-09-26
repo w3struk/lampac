@@ -115,7 +115,7 @@ namespace TelegramAuth.Services.Bot
                 $"1. Открой {EscapeHtml(name)}\n" +
                 "2. Скопируй UID с экрана авторизации\n" +
                 "3. Отправь его мне\n" +
-                "4. Вернись в " + EscapeHtml(name) + " и нажми <b>«Проверить снова»</b>\n\n" +
+                "4. Вернись в " + EscapeHtml(name) + " — вход выполнится автоматически\n\n" +
                 "Или просто используй кнопки ниже 👇";
             await bot.SendMessage(chatId, text, parseMode: ParseMode.Html, replyMarkup: MainMenuKeyboard(), cancellationToken: ct).ConfigureAwait(false);
         }

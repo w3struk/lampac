@@ -84,9 +84,9 @@ namespace TelegramAuth.Services.Bot
             {
                 string blocked;
                 if (user.registrationPending)
-                    blocked = "Аккаунт ожидает подтверждения администратора. Когда доступ подтвердят, нажми «Проверить снова» в приложении.";
+                    blocked = "Аккаунт ожидает подтверждения администратора. Как только доступ подтвердят, вход в приложении выполнится автоматически.";
                 else if (user.disabled)
-                    blocked = "Доступ отключён администратором. Если только что отправил UID, дождись включения и снова нажми «Проверить снова» в приложении.";
+                    blocked = "Доступ отключён администратором. Если только что отправил UID, дождись включения — вход в приложении выполнится автоматически.";
                 else
                     blocked = "Твой доступ истёк.";
                 await bot.SendMessage(chatId, blocked, replyMarkup: MainMenuKeyboard(), cancellationToken: ct).ConfigureAwait(false);
@@ -105,7 +105,7 @@ namespace TelegramAuth.Services.Bot
                     userText =
                         $"✅ <b>Запрос принят</b>\n\n<code>{EscapeHtml(uid)}</code>\n\n" +
                         "Аккаунт создан и <b>ждёт подтверждения</b> администратора (уведомление с кнопками «Принять» / «Отклонить» или список <code>/users</code>).\n\n" +
-                        $"После подтверждения вернись в {EscapeHtml(name)} и нажми <b>«Проверить снова»</b>.";
+                        $"После подтверждения вернись в {EscapeHtml(name)} — вход выполнится автоматически.";
                 }
                 else
                 {
@@ -114,7 +114,7 @@ namespace TelegramAuth.Services.Bot
                         : "\n\n💡 Подсказка: кнопкой <b>📱 Мои устройства</b> можно посмотреть и отвязать устройства.";
                     userText =
                         $"✅ <b>Устройство привязано</b>\n\n<code>{EscapeHtml(uid)}</code>\n\n" +
-                        $"Вернись в {EscapeHtml(name)} и нажми <b>«Проверить снова»</b>.{extra}";
+                        $"Вернись в {EscapeHtml(name)} — вход выполнится автоматически.{extra}";
                 }
 
                 await bot.SendMessage(chatId, userText, parseMode: ParseMode.Html, replyMarkup: MainMenuKeyboard(), cancellationToken: ct).ConfigureAwait(false);
@@ -127,7 +127,7 @@ namespace TelegramAuth.Services.Bot
                 if (bind.Detail == BindCompleteDetail.NotFound)
                     await bot.SendMessage(chatId, "⛔ Тебя нет в базе бота. Обратись к администратору для регистрации.", parseMode: ParseMode.Html, replyMarkup: MainMenuKeyboard(), cancellationToken: ct).ConfigureAwait(false);
                 else if (bind.Detail == BindCompleteDetail.Disabled)
-                    await bot.SendMessage(chatId, "⛔ Доступ отключён администратором. Если только что отправил UID, дождись включения и снова нажми «Проверить снова» в приложении.", parseMode: ParseMode.Html, replyMarkup: MainMenuKeyboard(), cancellationToken: ct).ConfigureAwait(false);
+                    await bot.SendMessage(chatId, "⛔ Доступ отключён администратором. Если только что отправил UID, дождись включения — вход в приложении выполнится автоматически.", parseMode: ParseMode.Html, replyMarkup: MainMenuKeyboard(), cancellationToken: ct).ConfigureAwait(false);
                 else if (bind.Detail == BindCompleteDetail.InternalError || string.IsNullOrEmpty(bind.Detail))
                     await bot.SendMessage(chatId, "⚠️ Не удалось привязать устройство. Внутренняя ошибка — попробуй позже или обратись к администратору.", parseMode: ParseMode.Html, replyMarkup: MainMenuKeyboard(), cancellationToken: ct).ConfigureAwait(false);
                 else
@@ -289,7 +289,7 @@ namespace TelegramAuth.Services.Bot
                 $"1. Открой {EscapeHtml(name)} и дойди до экрана авторизации\n" +
                 "2. Скопируй UID устройства\n" +
                 "3. Отправь UID мне сюда\n" +
-                "4. Вернись в " + EscapeHtml(name) + " и нажми <b>«Проверить снова»</b>\n\n" +
+                "4. Вернись в " + EscapeHtml(name) + " — вход выполнится автоматически\n\n" +
                 "<b>Кнопки:</b>\n" +
                 "👤 Мой статус — профиль и срок доступа\n" +
                 "📱 Мои устройства — список; отвязать активные, включить отключённые\n" +
