@@ -1,39 +1,39 @@
 ---
 title: "Community: Telegram-авторизация в Lampac"
 sidebarTitle: "Community"
-description: "Обзор модулей TelegramAuth и TelegramAuthBot: вход в Lampac через Telegram вместо пароля."
-keywords: ["TelegramAuth", "TelegramAuthBot", "Lampac Telegram", "accsdb"]
+description: "Модуль TelegramAuth: вход в Lampac через Telegram вместо пароля и встроенный бот привязки устройств."
+keywords: ["TelegramAuth", "Lampac Telegram", "accsdb", "Telegram bot"]
 ---
 
-Папка `Modules/Community/` содержит два подмодуля. Вместе они заменяют стандартную модалку пароля/CUB на полноэкранный Telegram-гейт.
+Папка `Modules/Community/` содержит модуль `TelegramAuth`. Он заменяет стандартную модалку пароля/CUB на полноэкранный Telegram-гейт и содержит встроенный long-polling бот привязки устройств.
 
 <Note>
-  Оба модуля по умолчанию находятся в `BaseModule.SkipModules` и имеют `"enable": false` в `manifest.json`.
+  По умолчанию модуль указан в `BaseModule.SkipModules`.
 </Note>
 
 <Columns cols={2}>
   <Card title="TelegramAuth" href="/modules/telegram-auth" icon="key-round">
-    Хранилище пользователей, HTTP API `/tg/auth/*` и синхронизация UID в accsdb
+    Хранилище пользователей, HTTP API `/tg/auth/*`, синхронизация UID в accsdb и бот привязки
   </Card>
-  <Card title="TelegramAuthBot" href="/modules/telegram-auth-bot" icon="bot">
-    Telegram-бот: привязка UID, устройства и админ-команды
+  <Card title="Tg-notify" href="/modules/tg-notify" icon="send">
+    Уведомления о новых сериях и озвучках
   </Card>
 </Columns>
 
-## Включить оба модуля
+## Включить модуль
 
 <Steps>
-  <Step title="Скопируйте секции в init.conf">
-    Возьмите структуру из `Modules/Community/TelegramAuth/init.merge.example.json` и `TelegramAuthBot/init.merge.example.json`.
+  <Step title="Скопируйте секцию в init.conf">
+    Возьмите структуру из `Modules/Community/TelegramAuth/init.merge.example.json`.
   </Step>
-  <Step title="Задайте одинаковый secrets">
-    `mutations_api_secret` должен совпадать в обоих модулях и быть ненулевым в проде.
+  <Step title="Задайте secret">
+    `mutations_api_secret` должен быть ненулевым в проде.
   </Step>
-  <Step title="Включите манифесты">
-    В `manifest.json` каждого модуля установите `"enable": true` (через копию в `mods/`).
+  <Step title="Проверьте манифест">
+    Манифест модуля содержит `"enable": true`. Переопределить состояние можно копией модуля в `mods/`.
   </Step>
   <Step title="Уберите из SkipModules">
-    Удалите `TelegramAuth` и `TelegramAuthBot` из `BaseModule.SkipModules`.
+    Удалите `TelegramAuth` из `BaseModule.SkipModules`.
   </Step>
   <Step title="Включите TelegramAuth.enable">
     `TelegramAuth.enable: true` поднимает `accsdb.enable` и синхронизирует UID в `users.json`.

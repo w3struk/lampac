@@ -151,7 +151,7 @@
       "parent": "Modules Overview",
       "page_notes": [
         {
-          "content": "User-facing guides: https://docs.lampac.dev/modules/community https://docs.lampac.dev/modules/telegram-auth https://docs.lampac.dev/modules/telegram-auth-bot https://docs.lampac.dev/modules/tg-notify https://docs.lampac.dev/modules/kit https://docs.lampac.dev/modules/external-bind https://docs.lampac.dev/modules/forkplayer https://docs.lampac.dev/modules/msx-native https://docs.lampac.dev/modules/potok"
+          "content": "User-facing guides: https://docs.lampac.dev/modules/community https://docs.lampac.dev/modules/telegram-auth https://docs.lampac.dev/modules/tg-notify https://docs.lampac.dev/modules/kit https://docs.lampac.dev/modules/external-bind https://docs.lampac.dev/modules/forkplayer https://docs.lampac.dev/modules/msx-native https://docs.lampac.dev/modules/potok"
         }
       ]
     },

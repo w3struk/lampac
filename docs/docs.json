@@ -97,6 +97,10 @@
     {
       "source": "/docs/api/:slug",
       "destination": "/api/:slug"
+    },
+    {
+      "source": "/modules/telegram-auth-bot",
+      "destination": "/modules/telegram-auth"
     }
   ],
   "api": {
@@ -263,7 +267,6 @@
                 "pages": [
                   "modules/community",
                   "modules/telegram-auth",
-                  "modules/telegram-auth-bot",
                   "modules/tg-notify",
                   "modules/kit",
                   "modules/external-bind",

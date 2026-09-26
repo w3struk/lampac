@@ -80,8 +80,7 @@ flowchart TD
 | ForkPlayerXML | Плейлисты `/fxml` |
 | MsxNative | Клиент MSX |
 | Potok | Служебные маршруты `/blue-oyster/*`, `/naked-gun/*` |
-| TelegramAuth | HTTP API `/tg/auth/*` |
-| TelegramAuthBot | Long-polling бот привязки |
+| TelegramAuth | HTTP API `/tg/auth/*` и встроенный бот привязки |
 
 ### Дополнительно исключены starter-конфигурацией
 
@@ -97,7 +96,7 @@ flowchart TD
 
 ### Выключены через manifest.json
 
-Среди модулей с `"enable": false`: AdminPanel, DatabaseEditor, ExternalBind, Music, Telemetry, Tg-notify.bot, Tracks, Transcoding, WatchTogether, TelegramAuth, TelegramAuthBot и LogUserRequest-Lite.
+Среди модулей с `"enable": false`: AdminPanel, DatabaseEditor, ExternalBind, Music, Telemetry, Tg-notify.bot, Tracks, Transcoding, WatchTogether, TelegramAuth и LogUserRequest-Lite.
 
 Полный актуальный каталог: [модули Lampac](/modules/overview).
 
